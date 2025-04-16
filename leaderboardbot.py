@@ -147,71 +147,7 @@ async def leaderboard(interaction: discord.Interaction):
     except Exception as e:
         await interaction.response.send_message(f"❌ Error fetching leaderboard: {e}")
 
-# Slash Command: Zeigt den Rang des Users an
-@tree.command(name="myrank", description="Show your current rank in the leaderboard.")
-async def myrank(interaction: discord.Interaction):
-    leaderboard_path = "leaderboard.json"
 
-    # Überprüfe, ob die JSON-Datei existiert
-    if not os.path.exists(leaderboard_path):
-        await interaction.response.send_message("❌ The leaderboard is not set yet. Please contact an admin.")
-        return
-
-    # Lade die Daten aus der JSON-Datei
-    with open(leaderboard_path, "r") as f:
-        leaderboard_data = json.load(f)
-
-    start_date = leaderboard_data.get("start_at")
-    end_date = leaderboard_data.get("end_at")
-
-    if not start_date or not end_date:
-        await interaction.response.send_message("❌ The leaderboard is not set yet. Please contact an admin.")
-        return
-
-    # Hole die API-Daten
-    params = {
-        "start_at": start_date,
-        "end_at": end_date,
-        "key": API_KEY
-    }
-
-    try:
-        data = await fetch_api_data(params)
-
-        # Falls die API-Antwort nicht das erwartete Format besitzt
-        if isinstance(data, str):
-            raise ValueError(f"Unexpected API response: {data}")
-        
-        if not data.get("affiliates"):
-            await interaction.response.send_message("❌ No leaderboard data available for the specified period.")
-            return
-
-        # Suche nach dem Benutzer in den Affiliates
-        user_id = interaction.user.id  # Discord ID des Nutzers
-        user_data = None
-        for affiliate in data.get("affiliates", []):
-            if affiliate.get("username") == user_id:
-                user_data = affiliate
-                break
-
-        if not user_data:
-            await interaction.response.send_message(f"❌ You are not on the leaderboard yet, {interaction.user.mention}.")
-            return
-
-        # Erstelle die Antwort-Nachricht
-        wagered_amount = user_data.get("wagered_amount", "N/A")
-        user_rank = f"Your rank: {user_data.get('rank', 'N/A')}"
-        
-        embed = discord.Embed(
-            title=f"🏅 {interaction.user.name}'s Current Rank",
-            description=f"**Your current wagered amount:** {wagered_amount}\n{user_rank}",
-            color=discord.Color.green()
-        )
-        
-        await interaction.response.send_message(embed=embed)
-
-    except Exception as e:
-        await interaction.response.send_message(f"❌ Error fetching your rank: {e}")
 
 
 # Slash Command (Admin): Setzt den Leaderboard-Zeitraum für einen benutzerdefinierten Zeitraum
@@ -292,7 +228,7 @@ async def info(interaction: discord.Interaction):
             inline=False
         )
 
-    embed.set_footer(text="Use /leaderboard or /myrank to check your position!")
+    embed.set_footer(text="Use /leaderboard to see the leaderboard")
 
     await interaction.response.send_message(embed=embed)
 
