@@ -1,7 +1,7 @@
 import discord
 from discord.ext import commands
 from discord import app_commands
-import requests
+import aiohttp
 import datetime
 import os
 import json
@@ -62,6 +62,14 @@ def get_user_rank(data, username: str):
             return i, entry["wagered"]
     return None, 0
 
+# Asynchrone Funktion, um Daten von der API zu holen
+async def fetch_api_data(params: dict):
+    async with aiohttp.ClientSession() as session:
+        async with session.get(API_URL, params=params) as response:
+            # Falls ein Fehler auftritt, wird eine Exception raised
+            response.raise_for_status()
+            return await response.json()
+
 # Slash Command: Zeigt das aktuelle Leaderboard an
 @tree.command(name="leaderboard", description="Show the current Rainbet leaderboard for the set period.")
 async def leaderboard(interaction: discord.Interaction):
@@ -75,9 +83,7 @@ async def leaderboard(interaction: discord.Interaction):
         "key": API_KEY
     }
     try:
-        response = requests.get(API_URL, params=params)
-        data = response.json()
-
+        data = await fetch_api_data(params)
         embed = discord.Embed(
             title=f"🏆 Rainbet Leaderboard – {current_leaderboard_start_date.strftime('%B %Y')}",
             description=format_leaderboard(data),
@@ -90,7 +96,6 @@ async def leaderboard(interaction: discord.Interaction):
             "3rd = $20\n"
             "$10 for everyone over $1,000 wagered!"
         ), inline=False)
-
         await interaction.response.send_message(embed=embed)
     except Exception as e:
         await interaction.response.send_message(f"❌ Error fetching leaderboard: {e}")
@@ -108,15 +113,14 @@ async def myrank(interaction: discord.Interaction):
         "key": API_KEY
     }
     try:
-        response = requests.get(API_URL, params=params)
-        data = response.json()
+        data = await fetch_api_data(params)
         users = load_users()
         # Verwende die Discord-ID, um den verknüpften Rainbet-Namen zu erhalten
         discord_id = str(interaction.user.id)
         if discord_id in users:
             rainbet_username = users[discord_id]
         else:
-            # Fallback: verwende den Discord-Namen, falls kein Link existiert
+            # Fallback: Verwende den Discord-Namen, falls kein Link existiert
             rainbet_username = interaction.user.name
 
         rank, wagered = get_user_rank(data, rainbet_username)
@@ -152,7 +156,7 @@ async def set_leaderboard(interaction: discord.Interaction, start_date: str, end
 
 # Slash Command: Verknüpfe deinen Discord-Account mit deinem Rainbet-Benutzernamen
 @tree.command(name="linkrainbet", description="Link your Discord account to your Rainbet username.")
-async def linkrainbet(interaction: discord.Interaction, rainbet_username: str):
+async def link(interaction: discord.Interaction, rainbet_username: str):
     """
     Link your Discord account with your Rainbet username.
     Parameter:
@@ -168,7 +172,10 @@ async def linkrainbet(interaction: discord.Interaction, rainbet_username: str):
 # on_ready Event: Synchronisiert die Slash Commands bei Start
 @bot.event
 async def on_ready():
-    await tree.sync()
+    # Optionale guild-spezifische Sync (falls du nur einen Server testest)
+    # guild = discord.Object(id=YOUR_GUILD_ID)
+    # await tree.sync(guild=guild)
+    await tree.sync()  # Globaler Sync
     print(f"{bot.user} is online and slash commands are synced!")
 
 bot.run(DISCORD_TOKEN)
