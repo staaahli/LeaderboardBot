@@ -163,27 +163,92 @@ async def myrank(interaction: discord.Interaction):
         await interaction.response.send_message(f"❌ Error fetching your rank: {e}")
 
 # Slash Command (Admin): Setzt den Leaderboard-Zeitraum für einen benutzerdefinierten Zeitraum
-@tree.command(name="set_leaderboard", description="(Admin) Set the leaderboard period with start and end date (YYYY-MM-DD).")
+@app_commands.command(name="setleaderboard", description="Set the leaderboard period and prizes (Admin only)")
 @app_commands.checks.has_permissions(administrator=True)
-async def set_leaderboard(interaction: discord.Interaction, start_date: str, end_date: str):
-    """
-    Set the leaderboard date range.
-    Parameters:
-    - start_date (str): The start date in YYYY-MM-DD format.
-    - end_date (str): The end date in YYYY-MM-DD format.
-    """
-    try:
-        set_leaderboard_for_dates(start_date, end_date)
-        await interaction.response.send_message(
-            f"🎯 Leaderboard period set to: {current_leaderboard_start_date.strftime('%B %d, %Y')} - "
-            f"{current_leaderboard_end_date.strftime('%B %d, %Y')}"
+async def set_leaderboard(
+    interaction: discord.Interaction,
+    start_date: str,
+    end_date: str,
+    prize_1st: str,
+    prize_2nd: str,
+    prize_3rd: str,
+    bonus_threshold: Optional[float] = None,
+    bonus_reward: Optional[str] = None
+):
+    leaderboard_path = "leaderboard.json"
+
+    # Create JSON if it doesn't exist
+    if not os.path.exists(leaderboard_path):
+        with open(leaderboard_path, "w") as f:
+            json.dump({}, f)
+
+    data = {
+        "start_at": start_date,
+        "end_at": end_date,
+        "prizes": {
+            "1st": prize_1st,
+            "2nd": prize_2nd,
+            "3rd": prize_3rd,
+            "bonus_threshold": bonus_threshold,
+            "bonus_reward": bonus_reward
+        }
+    }
+
+    with open(leaderboard_path, "w") as f:
+        json.dump(data, f, indent=4)
+
+    await interaction.response.send_message(f"✅ Leaderboard set from **{start_date}** to **{end_date}** with updated prizes!")
+
+@tree.command(name="info", description="Information about the current leaderboard")
+async def info(interaction: discord.Interaction):
+    leaderboard_data = {}
+    if os.path.exists("leaderboard.json"):
+        with open("leaderboard.json", "r") as f:
+            leaderboard_data = json.load(f)
+
+    prizes = leaderboard_data.get("prizes", {})
+    prize1 = prizes.get("1st", "TBA")
+    prize2 = prizes.get("2nd", "TBA")
+    prize3 = prizes.get("3rd", "TBA")
+    bonus_threshold = prizes.get("bonus_threshold")
+    bonus_reward = prizes.get("bonus_reward")
+
+    bonus_line = ""
+    if bonus_threshold and bonus_reward:
+        bonus_line = f"🎁 Bonus – {bonus_reward} for ${bonus_threshold}+ wagered"
+
+    embed = discord.Embed(
+        title="🎰 Rainbet Leaderboard Challenge",
+        description="Track your wagers. Climb the leaderboard. Win real cash!",
+        color=discord.Color.blurple()
+    )
+    embed.add_field(
+        name="📝 How to join",
+        value="Register with [this link](https://rainbet.com/?r=casynetic) or use **code `casynetic`**\nLink your Rainbet username using `/link`",
+        inline=False
+    )
+    embed.add_field(
+        name="🏆 Current Prizes",
+        value=f"🥇 1st – {prize1}\n🥈 2nd – {prize2}\n🥉 3rd – {prize3}\n{bonus_line}",
+        inline=False
+    )
+
+    if leaderboard_data.get("start_at") and leaderboard_data.get("end_at"):
+        embed.add_field(
+            name="🗓️ Date Range",
+            value=f"{leaderboard_data['start_at']} to {leaderboard_data['end_at']}",
+            inline=False
         )
-    except ValueError as e:
-        await interaction.response.send_message(f"❌ Error: {e}")
+
+    embed.set_footer(text="Use /leaderboard or /myrank to check your position!")
+
+    await interaction.response.send_message(embed=embed)
+
+
 
 # Slash Command: Verknüpfe deinen Discord-Account mit deinem Rainbet-Benutzernamen
-@tree.command(name="link", description="Link your Discord account to your Rainbet username.")
-async def link(interaction: discord.Interaction, rainbet_username: str):
+@tree.command(name="linkrainbet", description="Link your Discord account to your Rainbet username.")
+async def linkrainbet(interaction: discord.Interaction, rainbet_username: str):
     """
     Link your Discord account with your Rainbet username.
     Parameter:
