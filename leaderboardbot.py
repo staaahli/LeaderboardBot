@@ -3,31 +3,35 @@ from discord.ext import commands, tasks
 import requests
 import datetime
 import os
-import json
 
 # --- CONFIG ---
 API_KEY = os.getenv("API_KEY")
 API_URL = "https://services.rainbet.com/v1/external/affiliates"
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
-USERS_FILE = "users.json"  # File to store user mappings
 
 # Bot setup
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="/", intents=intents)
 
-# Load user data from file
-def load_users():
-    # Check if the file exists, if not, create it
-    if not os.path.exists(USERS_FILE):
-        with open(USERS_FILE, "w") as f:
-            json.dump({}, f, indent=4)  # Create an empty dictionary if file doesn't exist
-    with open(USERS_FILE, "r") as f:
-        return json.load(f)
+# Variables to store the leaderboard period and linked users
+current_leaderboard_start_date = None
+current_leaderboard_end_date = None
+linked_users = {}  # To store the mapping between Discord users and Rainbet usernames
 
-# Save user data to file
-def save_users(users):
-    with open(USERS_FILE, "w") as f:
-        json.dump(users, f, indent=4)
+def set_leaderboard_for_dates(start_date_str, end_date_str):
+    """Set the leaderboard period for a custom date range."""
+    global current_leaderboard_start_date, current_leaderboard_end_date
+    
+    try:
+        current_leaderboard_start_date = datetime.datetime.strptime(start_date_str, "%Y-%m-%d").date()
+        current_leaderboard_end_date = datetime.datetime.strptime(end_date_str, "%Y-%m-%d").date()
+
+        # Ensure that the end date is not before the start date
+        if current_leaderboard_end_date < current_leaderboard_start_date:
+            raise ValueError("The end date cannot be before the start date.")
+    
+    except ValueError as e:
+        raise ValueError(f"Invalid date format. Please use 'YYYY-MM-DD'. Error: {e}")
 
 # Format for leaderboard entry
 def format_leaderboard(data):
@@ -38,7 +42,7 @@ def format_leaderboard(data):
         lines.append(f"{medal} {entry['username']} – ${entry['wagered']:,} wagered")
     return "\n".join(lines)
 
-# Find rank by Rainbet username
+# Find rank by Discord username
 def get_user_rank(data, username):
     sorted_data = sorted(data, key=lambda x: x.get("wagered", 0), reverse=True)
     for i, entry in enumerate(sorted_data, start=1):
@@ -49,13 +53,13 @@ def get_user_rank(data, username):
 # Command to fetch leaderboard
 @bot.command()
 async def leaderboard(ctx):
-    today = datetime.date.today()
-    start_at = today.replace(day=1).strftime("%Y-%m-%d")
-    end_at = today.strftime("%Y-%m-%d")
+    if current_leaderboard_start_date is None or current_leaderboard_end_date is None:
+        await ctx.send("❌ The leaderboard is not set yet. Please contact the admin.")
+        return
 
     params = {
-        "start_at": start_at,
-        "end_at": end_at,
+        "start_at": current_leaderboard_start_date.strftime("%Y-%m-%d"),
+        "end_at": current_leaderboard_end_date.strftime("%Y-%m-%d"),
         "key": API_KEY
     }
 
@@ -64,7 +68,7 @@ async def leaderboard(ctx):
         data = response.json()
 
         embed = discord.Embed(
-            title="🏆 Rainbet Leaderboard – April Challenge",
+            title=f"🏆 Rainbet Leaderboard – {current_leaderboard_start_date.strftime('%B %Y')}",
             description=format_leaderboard(data),
             color=discord.Color.gold()
         )
@@ -79,13 +83,13 @@ async def leaderboard(ctx):
 # Command to fetch user's own rank
 @bot.command()
 async def myrank(ctx):
-    today = datetime.date.today()
-    start_at = today.replace(day=1).strftime("%Y-%m-%d")
-    end_at = today.strftime("%Y-%m-%d")
+    if current_leaderboard_start_date is None or current_leaderboard_end_date is None:
+        await ctx.send("❌ The leaderboard is not set yet. Please contact the admin.")
+        return
 
     params = {
-        "start_at": start_at,
-        "end_at": end_at,
+        "start_at": current_leaderboard_start_date.strftime("%Y-%m-%d"),
+        "end_at": current_leaderboard_end_date.strftime("%Y-%m-%d"),
         "key": API_KEY
     }
 
@@ -93,14 +97,8 @@ async def myrank(ctx):
         response = requests.get(API_URL, params=params)
         data = response.json()
 
-        # Check if user has linked Rainbet account
-        users = load_users()
-        discord_username = str(ctx.author).split("#")[0]
-        if discord_username not in users:
-            await ctx.send(f"❌ {ctx.author.mention}, you haven't linked your Rainbet account yet. Use `/linkrainbet <your_rainbet_name>` to link.")
-            return
-        username = users[discord_username]  # Get the Rainbet username from the mapping
-
+        # Get Discord username to find their Rainbet rank
+        username = str(ctx.author).split("#")[0]  # Match based on username only
         rank, wagered = get_user_rank(data, username)
 
         if rank:
@@ -111,31 +109,23 @@ async def myrank(ctx):
     except Exception as e:
         await ctx.send(f"❌ Error fetching your rank: {e}")
 
-# Command to link Rainbet account to Discord
+# Admin command to set leaderboard for custom date range
 @bot.command()
-async def linkrainbet(ctx, rainbet_username: str):
-    users = load_users()
-    discord_username = str(ctx.author).split("#")[0]
+@commands.has_permissions(administrator=True)
+async def set_leaderboard(ctx, start_date: str, end_date: str):
+    """Admin command to set the leaderboard for a custom date range."""
+    try:
+        set_leaderboard_for_dates(start_date, end_date)
+        await ctx.send(f"🎯 Leaderboard period set to: {current_leaderboard_start_date.strftime('%B %d, %Y')} - {current_leaderboard_end_date.strftime('%B %d, %Y')}")
+    except ValueError as e:
+        await ctx.send(f"❌ Error: {e}")
 
-    if discord_username in users:
-        await ctx.send(f"⚠️ {ctx.author.mention}, you have already linked your Rainbet account to {users[discord_username]}. If you want to update it, use `/unlinkrainbet`.")
-    else:
-        users[discord_username] = rainbet_username
-        save_users(users)
-        await ctx.send(f"✅ {ctx.author.mention}, your Rainbet account **{rainbet_username}** has been linked successfully!")
-
-# Command to unlink Rainbet account
+# Command to link Discord username to Rainbet account
 @bot.command()
-async def unlinkrainbet(ctx):
-    users = load_users()
-    discord_username = str(ctx.author).split("#")[0]
-
-    if discord_username in users:
-        del users[discord_username]
-        save_users(users)
-        await ctx.send(f"❌ {ctx.author.mention}, your Rainbet account has been unlinked.")
-    else:
-        await ctx.send(f"❌ {ctx.author.mention}, you haven't linked your Rainbet account yet.")
+async def link(ctx, rainbet_username: str):
+    """Link your Discord account to your Rainbet username."""
+    linked_users[ctx.author.id] = rainbet_username
+    await ctx.send(f"🔗 {ctx.author.mention}, your Discord account is now linked to Rainbet username: **{rainbet_username}**.")
 
 # Run bot
 bot.run(DISCORD_TOKEN)
