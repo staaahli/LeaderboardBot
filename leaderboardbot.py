@@ -190,7 +190,7 @@ async def myrank(interaction: discord.Interaction):
         user_id = interaction.user.id  # Discord ID des Nutzers
         user_data = None
         for affiliate in data.get("affiliates", []):
-            if affiliate.get("id") == user_id:
+            if affiliate.get("username") == user_id:
                 user_data = affiliate
                 break
 
