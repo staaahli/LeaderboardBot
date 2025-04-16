@@ -5,6 +5,7 @@ import aiohttp
 import datetime
 import os
 import json
+from typing import Optional
 
 # --- CONFIG ---
 API_KEY = os.getenv("API_KEY")
