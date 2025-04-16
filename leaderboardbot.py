@@ -164,7 +164,7 @@ async def myrank(interaction: discord.Interaction):
         await interaction.response.send_message(f"❌ Error fetching your rank: {e}")
 
 # Slash Command (Admin): Setzt den Leaderboard-Zeitraum für einen benutzerdefinierten Zeitraum
-@app_commands.command(name="setleaderboard", description="Set the leaderboard period and prizes (Admin only)")
+@tree.command(name="setleaderboard", description="Set the leaderboard period and prizes (Admin only)")
 @app_commands.checks.has_permissions(administrator=True)
 async def set_leaderboard(
     interaction: discord.Interaction,
