@@ -105,6 +105,15 @@ async def leaderboard(interaction: discord.Interaction):
     # Überprüfe, ob Start- und End-Daten vorhanden sind
     start_date = leaderboard_data.get("start_at")
     end_date = leaderboard_data.get("end_at")
+    prizes = leaderboard_data.get("prizes", {})
+    prize1 = prizes.get("1st", "TBA")
+    prize2 = prizes.get("2nd", "TBA")
+    prize3 = prizes.get("3rd", "TBA")
+    bonus_threshold = prizes.get("bonus_threshold")
+    bonus_reward = prizes.get("bonus_reward")
+    bonus_line = ""
+    if bonus_threshold and bonus_reward:
+        bonus_line = f"🎁 Bonus – {bonus_reward}$ for {bonus_threshold}$+ wagered"
 
     if not start_date or not end_date:
         await interaction.response.send_message("❌ The leaderboard is not set yet. Please contact an admin.")
@@ -135,12 +144,18 @@ async def leaderboard(interaction: discord.Interaction):
         )
 
         embed.set_footer(text=f"Updated: {datetime.datetime.now(datetime.UTC).strftime('%d %B %H:%M UTC')}")
-        embed.add_field(name="Bonus Info 💸", value=(
-            "1st = 100% of my 30.04 cashout (min. $50)\n"
-            "2nd = $30\n"
-            "3rd = $20\n"
-            "$10 for everyone over $1,000 wagered!"
-        ), inline=False)
+       
+        embed.add_field(
+        name="🏆 Current Prizes",
+        value=f"🥇 1st – {prize1}\n🥈 2nd – {prize2}\n🥉 3rd – {prize3}\n{bonus_line}",
+        inline=False
+        )
+        embed.add_field(
+            name="🗓️ Date Range",
+            value=f"{leaderboard_data['start_at']} to {leaderboard_data['end_at']}",
+            inline=False
+        )
+
         
         await interaction.response.send_message(embed=embed)
 
