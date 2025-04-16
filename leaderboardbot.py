@@ -216,7 +216,7 @@ async def info(interaction: discord.Interaction):
 
     bonus_line = ""
     if bonus_threshold and bonus_reward:
-        bonus_line = f"🎁 Bonus – {bonus_reward} for ${bonus_threshold}+ wagered"
+        bonus_line = f"🎁 Bonus – {bonus_reward}$ for {bonus_threshold}$+ wagered"
 
     embed = discord.Embed(
         title="🎰 Rainbet Leaderboard Challenge",
@@ -225,7 +225,7 @@ async def info(interaction: discord.Interaction):
     )
     embed.add_field(
         name="📝 How to join",
-        value="Register with [this link](https://rainbet.com/?r=casynetic) or use **code `casynetic`**\nLink your Rainbet username using `/link`",
+        value="Register with [this link](https://rainbet.com/?r=casynetic) or use **code `casynetic`**\nLink your Rainbet username using `/linkrainbet`",
         inline=False
     )
     embed.add_field(
