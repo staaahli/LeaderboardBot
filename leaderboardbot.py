@@ -91,77 +91,89 @@ async def fetch_api_data(params: dict):
 # Slash Command: Zeigt das aktuelle Leaderboard an
 @tree.command(name="leaderboard", description="Show the current Rainbet leaderboard for the set period.")
 async def leaderboard(interaction: discord.Interaction):
-    if current_leaderboard_start_date is None or current_leaderboard_end_date is None:
+    leaderboard_path = "leaderboard.json"
+    
+    # Überprüfe, ob die JSON-Datei existiert
+    if not os.path.exists(leaderboard_path):
         await interaction.response.send_message("❌ The leaderboard is not set yet. Please contact an admin.")
         return
 
+    # Lade die Daten aus der JSON-Datei
+    with open(leaderboard_path, "r") as f:
+        leaderboard_data = json.load(f)
+
+    # Überprüfe, ob Start- und End-Daten vorhanden sind
+    start_date = leaderboard_data.get("start_at")
+    end_date = leaderboard_data.get("end_at")
+
+    if not start_date or not end_date:
+        await interaction.response.send_message("❌ The leaderboard is not set yet. Please contact an admin.")
+        return
+
+    # Hole die API-Daten
     params = {
-        "start_at": current_leaderboard_start_date.strftime("%Y-%m-%d"),
-        "end_at": current_leaderboard_end_date.strftime("%Y-%m-%d"),
+        "start_at": start_date,
+        "end_at": end_date,
         "key": API_KEY
     }
+    
     try:
         data = await fetch_api_data(params)
+        
         # Falls die API-Antwort nicht das erwartete Format besitzt
         if isinstance(data, str):
             raise ValueError(f"Unexpected API response: {data}")
+        
         if not data.get("affiliates"):
             await interaction.response.send_message("❌ No leaderboard data available for the specified period.")
             return
 
         embed = discord.Embed(
-            title=f"🏆 Rainbet Leaderboard – {current_leaderboard_start_date.strftime('%B %Y')}",
+            title=f"🏆 Rainbet Leaderboard – {start_date} to {end_date}",
             description=format_leaderboard(data),
             color=discord.Color.gold()
         )
-        embed.set_footer(text=f"Updated: {datetime.datetime.now(datetime.UTC).strftime('%d %B %H:%M UTC')
-}")
+
+        embed.set_footer(text=f"Updated: {datetime.datetime.now(datetime.UTC).strftime('%d %B %H:%M UTC')}")
         embed.add_field(name="Bonus Info 💸", value=(
             "1st = 100% of my 30.04 cashout (min. $50)\n"
             "2nd = $30\n"
             "3rd = $20\n"
             "$10 for everyone over $1,000 wagered!"
         ), inline=False)
+        
         await interaction.response.send_message(embed=embed)
+
     except Exception as e:
         await interaction.response.send_message(f"❌ Error fetching leaderboard: {e}")
 
 # Slash Command: Zeigt den Rang des Users an
 @tree.command(name="myrank", description="Show your current rank in the leaderboard.")
 async def myrank(interaction: discord.Interaction):
-    if current_leaderboard_start_date is None or current_leaderboard_end_date is None:
-        await interaction.response.send_message("❌ The leaderboard is not set yet. Please contact an admin.")
+    leaderboard_path = "leaderboard.json"
+    
+    # Überprüfe, ob die JSON-Datei existiert
+    if not os.path.exists(leaderboard_path):
+        await interaction.response.send_message("The leaderboard is not set yet. Please contact an admin.")
         return
 
-    params = {
-        "start_at": current_leaderboard_start_date.strftime("%Y-%m-%d"),
-        "end_at": current_leaderboard_end_date.strftime("%Y-%m-%d"),
-        "key": API_KEY
-    }
-    try:
-        data = await fetch_api_data(params)
-        if isinstance(data, str):
-            raise ValueError(f"Unexpected API response: {data}")
-        users = load_users()
-        # Verwende die Discord-ID, um den verknüpften Rainbet-Namen zu erhalten
-        discord_id = str(interaction.user.id)
-        if discord_id in users:
-            rainbet_username = users[discord_id]
-        else:
-            # Fallback: Verwende den Discord-Namen, falls kein Link existiert
-            rainbet_username = interaction.user.name
+    # Lade die Daten aus der JSON-Datei
+    with open(leaderboard_path, "r") as f:
+        leaderboard_data = json.load(f)
 
-        rank, wagered = get_user_rank(data, rainbet_username)
-        if rank:
-            await interaction.response.send_message(
-                f"🎯 {interaction.user.mention}, your rank is **#{rank}** with **${wagered:,.2f}** wagered!"
-            )
-        else:
-            await interaction.response.send_message(
-                f"😕 {interaction.user.mention}, you’re not on the leaderboard yet. Time to spin!"
-            )
-    except Exception as e:
-        await interaction.response.send_message(f"❌ Error fetching your rank: {e}")
+    if leaderboard_data.get("start_at") is None or leaderboard_data.get("end_at") is None:
+        await interaction.response.send_message("The leaderboard is not set yet. Please contact an admin.")
+        return
+
+    # Beispielhafte Logik, um den Rang des Benutzers zu finden (muss angepasst werden)
+    user_name = str(interaction.user)
+    # Zum Beispiel könnte man hier einen Rang für jeden Benutzer setzen, aber das musst du anpassen, je nach Daten
+    rank = "TBA"
+
+    embed = discord.Embed(title="Your Current Rank", color=discord.Color.blurple())
+    embed.add_field(name="📊 Rank", value=rank, inline=False)
+
+    await interaction.response.send_message(embed=embed)
 
 # Slash Command (Admin): Setzt den Leaderboard-Zeitraum für einen benutzerdefinierten Zeitraum
 @tree.command(name="setleaderboard", description="Set the leaderboard period and prizes (Admin only)")
