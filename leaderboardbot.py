@@ -113,7 +113,8 @@ async def leaderboard(interaction: discord.Interaction):
             description=format_leaderboard(data),
             color=discord.Color.gold()
         )
-        embed.set_footer(text=f"Updated: {datetime.datetime.utcnow().strftime('%d %B %H:%M UTC')}")
+        embed.set_footer(text=f"Updated: {datetime.datetime.now(datetime.UTC).strftime('%d %B %H:%M UTC')
+}")
         embed.add_field(name="Bonus Info 💸", value=(
             "1st = 100% of my 30.04 cashout (min. $50)\n"
             "2nd = $30\n"
