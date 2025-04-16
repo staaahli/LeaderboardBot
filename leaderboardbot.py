@@ -47,24 +47,32 @@ def set_leaderboard_for_dates(start_date_str: str, end_date_str: str):
 
 # Hilfsfunktion: Formatierung des Leaderboards
 def format_leaderboard(data):
-    # Hier nehmen wir an, dass data eine Liste von Dictionaries ist.
+    # Extrahiere die Affiliates-Liste aus der API-Antwort
+    affiliates = data.get("affiliates", [])
+    # Sortiere nach wagered_amount als float
     try:
-        sorted_data = sorted(data, key=lambda x: x.get("wagered", 0), reverse=True)
+        sorted_data = sorted(
+            affiliates, key=lambda x: float(x.get("wagered_amount", "0")), reverse=True
+        )
     except Exception as e:
         raise ValueError("Unexpected data format received from API") from e
 
     lines = []
     for i, entry in enumerate(sorted_data[:5]):
         medal = ["🥇", "🥈", "🥉", "4.", "5."][i]
-        lines.append(f"{medal} {entry['username']} – ${entry['wagered']:,} wagered")
+        wagered = float(entry.get("wagered_amount", "0"))
+        lines.append(f"{medal} {entry['username']} – ${wagered:,.2f} wagered")
     return "\n".join(lines)
 
 # Hilfsfunktion: Rangermittlung anhand eines Benutzernamens
 def get_user_rank(data, username: str):
-    sorted_data = sorted(data, key=lambda x: x.get("wagered", 0), reverse=True)
+    affiliates = data.get("affiliates", [])
+    sorted_data = sorted(
+        affiliates, key=lambda x: float(x.get("wagered_amount", "0")), reverse=True
+    )
     for i, entry in enumerate(sorted_data, start=1):
         if entry["username"].lower() == username.lower():
-            return i, entry["wagered"]
+            return i, float(entry["wagered_amount"])
     return None, 0
 
 # Asynchrone Funktion, um Daten von der API zu holen
@@ -76,6 +84,7 @@ async def fetch_api_data(params: dict):
                 result = await response.json()
             except Exception:
                 result = await response.text()
+            print("DEBUG: API response:", result)  # Debug-Ausgabe; später entfernen
             return result
 
 # Slash Command: Zeigt das aktuelle Leaderboard an
@@ -92,10 +101,13 @@ async def leaderboard(interaction: discord.Interaction):
     }
     try:
         data = await fetch_api_data(params)
-        # Überprüfen, ob die Daten das erwartete Format haben:
+        # Falls die API-Antwort nicht das erwartete Format besitzt
         if isinstance(data, str):
-            # Vermutlich ist es ein Fehlertext oder etwas anderes
             raise ValueError(f"Unexpected API response: {data}")
+        if not data.get("affiliates"):
+            await interaction.response.send_message("❌ No leaderboard data available for the specified period.")
+            return
+
         embed = discord.Embed(
             title=f"🏆 Rainbet Leaderboard – {current_leaderboard_start_date.strftime('%B %Y')}",
             description=format_leaderboard(data),
@@ -140,7 +152,7 @@ async def myrank(interaction: discord.Interaction):
         rank, wagered = get_user_rank(data, rainbet_username)
         if rank:
             await interaction.response.send_message(
-                f"🎯 {interaction.user.mention}, your rank is **#{rank}** with **${wagered:,}** wagered!"
+                f"🎯 {interaction.user.mention}, your rank is **#{rank}** with **${wagered:,.2f}** wagered!"
             )
         else:
             await interaction.response.send_message(
@@ -186,7 +198,7 @@ async def link(interaction: discord.Interaction, rainbet_username: str):
 # on_ready Event: Synchronisiert die Slash Commands bei Start
 @bot.event
 async def on_ready():
-    await tree.sync()  # Globaler Sync, alternativ guild-spezifisch zum Testen
+    await tree.sync()  # Globaler Sync; alternativ guild-spezifisch zum Testen
     print(f"{bot.user} is online and slash commands are synced!")
 
 bot.run(DISCORD_TOKEN)
