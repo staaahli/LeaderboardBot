@@ -47,7 +47,12 @@ def set_leaderboard_for_dates(start_date_str: str, end_date_str: str):
 
 # Hilfsfunktion: Formatierung des Leaderboards
 def format_leaderboard(data):
-    sorted_data = sorted(data, key=lambda x: x.get("wagered", 0), reverse=True)
+    # Hier nehmen wir an, dass data eine Liste von Dictionaries ist.
+    try:
+        sorted_data = sorted(data, key=lambda x: x.get("wagered", 0), reverse=True)
+    except Exception as e:
+        raise ValueError("Unexpected data format received from API") from e
+
     lines = []
     for i, entry in enumerate(sorted_data[:5]):
         medal = ["🥇", "🥈", "🥉", "4.", "5."][i]
@@ -66,9 +71,12 @@ def get_user_rank(data, username: str):
 async def fetch_api_data(params: dict):
     async with aiohttp.ClientSession() as session:
         async with session.get(API_URL, params=params) as response:
-            # Falls ein Fehler auftritt, wird eine Exception raised
             response.raise_for_status()
-            return await response.json()
+            try:
+                result = await response.json()
+            except Exception:
+                result = await response.text()
+            return result
 
 # Slash Command: Zeigt das aktuelle Leaderboard an
 @tree.command(name="leaderboard", description="Show the current Rainbet leaderboard for the set period.")
@@ -84,6 +92,10 @@ async def leaderboard(interaction: discord.Interaction):
     }
     try:
         data = await fetch_api_data(params)
+        # Überprüfen, ob die Daten das erwartete Format haben:
+        if isinstance(data, str):
+            # Vermutlich ist es ein Fehlertext oder etwas anderes
+            raise ValueError(f"Unexpected API response: {data}")
         embed = discord.Embed(
             title=f"🏆 Rainbet Leaderboard – {current_leaderboard_start_date.strftime('%B %Y')}",
             description=format_leaderboard(data),
@@ -114,6 +126,8 @@ async def myrank(interaction: discord.Interaction):
     }
     try:
         data = await fetch_api_data(params)
+        if isinstance(data, str):
+            raise ValueError(f"Unexpected API response: {data}")
         users = load_users()
         # Verwende die Discord-ID, um den verknüpften Rainbet-Namen zu erhalten
         discord_id = str(interaction.user.id)
@@ -155,7 +169,7 @@ async def set_leaderboard(interaction: discord.Interaction, start_date: str, end
         await interaction.response.send_message(f"❌ Error: {e}")
 
 # Slash Command: Verknüpfe deinen Discord-Account mit deinem Rainbet-Benutzernamen
-@tree.command(name="linkrainbet", description="Link your Discord account to your Rainbet username.")
+@tree.command(name="link", description="Link your Discord account to your Rainbet username.")
 async def link(interaction: discord.Interaction, rainbet_username: str):
     """
     Link your Discord account with your Rainbet username.
@@ -172,10 +186,7 @@ async def link(interaction: discord.Interaction, rainbet_username: str):
 # on_ready Event: Synchronisiert die Slash Commands bei Start
 @bot.event
 async def on_ready():
-    # Optionale guild-spezifische Sync (falls du nur einen Server testest)
-    # guild = discord.Object(id=YOUR_GUILD_ID)
-    # await tree.sync(guild=guild)
-    await tree.sync()  # Globaler Sync
+    await tree.sync()  # Globaler Sync, alternativ guild-spezifisch zum Testen
     print(f"{bot.user} is online and slash commands are synced!")
 
 bot.run(DISCORD_TOKEN)
