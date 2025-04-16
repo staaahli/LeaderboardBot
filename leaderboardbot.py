@@ -11,6 +11,8 @@ DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 
 # Bot setup
 intents = discord.Intents.default()
+intents.message_content = True  # Diese Zeile hinzugefügt
+
 bot = commands.Bot(command_prefix="/", intents=intents)
 
 # Variables to store the leaderboard period and linked users
