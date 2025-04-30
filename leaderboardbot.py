@@ -148,75 +148,70 @@ async def pullwinners(interaction: discord.Interaction):
         await interaction.response.send_message("❌ The leaderboard is not set yet.")
         return
 
-    # Lade Zeitraum und Preise
+    # Lade Zeitrahmen & Preise
     with open(leaderboard_path, "r") as f:
         lb = json.load(f)
     start_date = lb.get("start_at")
     end_date = lb.get("end_at")
     prizes = lb.get("prizes", {})
-    if not start_date or not end_date:
-        await interaction.response.send_message("❌ Invalid leaderboard period.")
-        return
 
     # API-Daten holen
     params = {"start_at": start_date, "end_at": end_date, "key": API_KEY}
-    try:
-        data = await fetch_api_data(params)
-        if isinstance(data, str) or not data.get("affiliates"):
-            raise ValueError("Unexpected or empty API response")
+    data = await fetch_api_data(params)
+    if isinstance(data, str) or not data.get("affiliates"):
+        return await interaction.response.send_message("❌ No leaderboard data available.")
 
-        # Tickets pro User berechnen
-        ticket_map = {}
-        for entry in data["affiliates"]:
-            user = entry.get("username")
-            wagered = float(entry.get("wagered_amount", "0"))
-            tickets = int(wagered // 100)
-            if tickets > 0:
-                ticket_map[user] = tickets
+    # Tickets pro User berechnen
+    ticket_map = {}
+    for entry in data["affiliates"]:
+        user = entry["username"]
+        wagered = float(entry.get("wagered_amount", "0"))
+        tickets = int(wagered // 100)
+        if tickets > 0:
+            ticket_map[user] = tickets
 
-        if not ticket_map:
-            await interaction.response.send_message("❌ No tickets have been earned. Cannot draw winners.")
-            return
+    if not ticket_map:
+        return await interaction.response.send_message("❌ No tickets have been earned. Cannot draw winners.")
 
-        # Gewinner ziehen (ohne Zurücklegen)
-        candidates = list(ticket_map.keys())
-        winners = []
-        for _ in range(min(5, len(candidates))):
-            weights = [ticket_map[u] for u in candidates]
-            chosen = random.choices(candidates, weights=weights, k=1)[0]
-            winners.append(chosen)
-            candidates.remove(chosen)
+    # Lostopf bauen (einträge proportional zu Tickets)
+    ticket_pool = []
+    for user, tickets in ticket_map.items():
+        ticket_pool += [user] * tickets
 
-        # Nutzer-Mapping, um ggf. Discord-Mentions auszugeben
-        users = load_users()  # {discord_id: rainbet_username}
-        inv_map = {v.lower(): k for k, v in users.items()}
+    # Gewinner ziehen (5 Plätze oder weniger, ohne Zurücklegen)
+    winners = []
+    for _ in range(min(5, len(ticket_map))):
+        winner = random.choice(ticket_pool)
+        winners.append(winner)
+        # alle Lose dieses Gewinners entfernen
+        ticket_pool = [u for u in ticket_pool if u != winner]
 
-        # Embed bauen
-        embed = discord.Embed(
-            title="🎉 Leaderboard Lottery Winners",
-            description=f"📅 {start_date} to {end_date}",
-            color=discord.Color.green()
+    # Nutzer-Mapping für Discord-Mentions
+    users = load_users()
+    inv_map = {v.lower(): k for k, v in users.items()}
+
+    # Embed bauen
+    embed = discord.Embed(
+        title="🎉 Leaderboard Lottery Winners",
+        description=f"📅 {start_date} to {end_date}",
+        color=discord.Color.green()
+    )
+    medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
+    places = ["1st", "2nd", "3rd", "4th", "5th"]
+    for i, winner in enumerate(winners):
+        medal = medals[i]
+        prize = prizes.get(places[i], "TBA")
+        tickets = ticket_map[winner]
+        disc_id = inv_map.get(winner.lower())
+        mention = f"<@{disc_id}>" if disc_id else winner
+        embed.add_field(
+            name=f"{medal} {mention}",
+            value=f"🎟️ Tickets: {tickets}  •  🏆 Prize: {prize}",
+            inline=False
         )
-        places = ["1st", "2nd", "3rd", "4th", "5th"]
-        medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
 
-        for i, winner in enumerate(winners):
-            medal = medals[i]
-            prize = prizes.get(places[i], "TBA")
-            tickets = ticket_map[winner]
-            # wenn verknüpft, mention, sonst nur Username
-            disc_id = inv_map.get(winner.lower())
-            mention = f"<@{disc_id}>" if disc_id else winner
-            embed.add_field(
-                name=f"{medal} {mention}",
-                value=f"🎟️ Tickets: {tickets}  •  🏆 Prize: {prize}",
-                inline=False
-            )
+    await interaction.response.send_message(embed=embed)
 
-        await interaction.response.send_message(embed=embed)
-
-    except Exception as e:
-        await interaction.response.send_message(f"❌ Error drawing winners: {e}")
 
 @tree.command(name="info", description="Information about the current leaderboard")
 async def info(interaction: discord.Interaction):
