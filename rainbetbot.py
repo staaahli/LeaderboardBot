@@ -13,6 +13,7 @@ DATABASE_URL = os.getenv("DATABASE_URL")  # Railway automatically sets this
 API_KEY = os.getenv("API_KEY")  # Assuming you have an API key as an environment variable
 # Replace with your actual allowed channel ID
 ALLOWED_COMMAND_CHANNEL_ID_FOR_LINK = 1368529085994893372  # <-- deinen Channel ID hier eintragen
+VERIFIED_ROLE_ID = 1368532802555088956
 def get_connection():
     return psycopg2.connect(DATABASE_URL, sslmode='require')
 
@@ -66,6 +67,14 @@ async def link(interaction: discord.Interaction, rainbet: str, kick: str):
             ephemeral=True
         )
         return
+    
+    verified_role = discord.utils.get(interaction.user.roles, id=VERIFIED_ROLE_ID)
+    if not verified_role:
+        await interaction.response.send_message(
+            "❌ You must have the **Verified** role to use this command.",
+            ephemeral=True
+        )
+        return
 
     try:
         url = f"https://services.rainbet.com/v1/external/affiliates?start_at=2025-04-15&end_at={datetime.now().strftime('%Y-%m-%d')}&key={API_KEY}"
@@ -108,6 +117,14 @@ async def unlink(interaction: discord.Interaction):
     if interaction.channel.id != ALLOWED_COMMAND_CHANNEL_ID_FOR_LINK:
         await interaction.response.send_message(
             f"❌ This command can only be used in <#{ALLOWED_COMMAND_CHANNEL_ID_FOR_LINK}>.",
+            ephemeral=True
+        )
+        return
+    
+    verified_role = discord.utils.get(interaction.user.roles, id=VERIFIED_ROLE_ID)
+    if not verified_role:
+        await interaction.response.send_message(
+            "❌ You must have the **Verified** role to use this command.",
             ephemeral=True
         )
         return
