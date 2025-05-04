@@ -84,21 +84,18 @@ async def on_ready():
     except Exception as e:
         print(f"Error syncing commands: {e}")
 
-# Command to set a milestone (with a reward and role_id) as an admin (slash command)
+# Admin-only command to set a milestone
 @bot.tree.command(name="set_milestone", description="Set a milestone and corresponding reward and role.")
+@app_commands.checks.has_permissions(administrator=True)
 async def set_milestone_cmd(interaction: discord.Interaction, milestone: int, reward: str, role: discord.Role):
     """Set a milestone (wager amount), its reward (role or prize), and the role ID."""
-    # Ensure the interaction user exists and check for admin permissions
-    if interaction.user is None or not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("You do not have permission to set milestones.")
-        return
-
     # Set milestone with role_id
     set_milestone(milestone, reward, role.id)
     await interaction.response.send_message(f"Milestone {milestone}, reward '{reward}', and role '{role.name}' have been set.")
 
-# Command to view the current milestones (slash command)
-@bot.tree.command(name="view_milestones", description="View the current milestones, rewards, and roles.")
+# Admin-only command to view milestones
+@bot.tree.command(name="view_milestones", description="Admin only – view the current milestones, rewards, and roles.")
+@app_commands.checks.has_permissions(administrator=True)
 async def view_milestones(interaction: discord.Interaction):
     """View all configured milestones, rewards, and role IDs."""
     milestones = load_milestones()
@@ -111,6 +108,14 @@ async def view_milestones(interaction: discord.Interaction):
     milestone_list = "\n".join([f"Milestone {milestone}: {reward['reward']} (Role: <@&{reward['role_id']}>)" for milestone, reward in milestones.items()])
     
     await interaction.response.send_message(f"Current milestones:\n{milestone_list}")
+
+# Admin-only command to view the leaderboard
+@bot.tree.command(name="leaderboard", description="Admin only – show & update the leaderboard.")
+@app_commands.checks.has_permissions(administrator=True)
+async def leaderboard_cmd(interaction: discord.Interaction):
+    """Show and update the leaderboard."""
+    # Your logic for showing/updating the leaderboard goes here
+    await interaction.response.send_message("Leaderboard updated successfully.")
 
 # Command to get the wager stats and show the progress bar (slash command)
 @bot.tree.command(name="progress", description="Check your wager progress using your Rainbet username.")
@@ -154,6 +159,14 @@ async def progress(interaction: discord.Interaction, rainbet_username: str):
         await dm.send(f"Your wager progress: {wager}\nMilestone: {closest_milestone} (Reward: {reward}, Role: {role.name})\n\nPlease open a ticket to claim your prize: {reward}.")
     else:
         await interaction.response.send_message(f"Your wager progress is {wager}. No milestone reached yet.")
+
+# Custom error handling for missing permissions
+@bot.tree.error
+async def on_command_error(interaction: discord.Interaction, error: Exception):
+    if isinstance(error, app_commands.MissingPermissions):
+        await interaction.response.send_message("You do not have the required permissions to use this command.", ephemeral=True)
+    else:
+        await interaction.response.send_message("An unexpected error occurred.", ephemeral=True)
 
 # Run the bot with your token
 bot.run(DISCORD_TOKEN)
