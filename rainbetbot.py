@@ -104,15 +104,6 @@ async def progress(interaction: discord.Interaction):
             )
             return
 
-        # Role restriction
-        REQUIRED_ROLE_ID = 1368532715246452806  # Replace with the verified role ID
-        affiliate_role = discord.utils.get(interaction.user.roles, id=REQUIRED_ROLE_ID)
-        if not affiliate_role:
-         await interaction.response.send_message(
-            "❌ You must have the Degen Syndicate role to use this command.",
-            ephemeral=True
-        )
-        return
 
         # Get linked Rainbet username from DB
         with get_connection() as conn:
