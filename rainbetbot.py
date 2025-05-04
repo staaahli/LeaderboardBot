@@ -152,9 +152,8 @@ async def progress(interaction: discord.Interaction):
         # Milestone reached
         if wagered >= milestone_amount:
             role = discord.utils.get(interaction.guild.roles, id=int(reward_role_id))
-            if role and role not in member.roles:
-                await member.add_roles(role)
-                message += (
+            await interaction.user.add_roles(role)
+            message += (
                     f"\n🎉 **Milestone reached!** You’ve been granted the role `{role.name}`.\n"
                     f"🎁 **Reward:** {reward_text}\n"
                     f"📩 Please open a ticket to claim your reward!"
