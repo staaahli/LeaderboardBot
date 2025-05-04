@@ -1,389 +1,157 @@
 import discord
 from discord.ext import commands
 from discord import app_commands
-import aiohttp
-import datetime
+import requests
+import sqlite3
+from datetime import datetime
 import os
-import json
-import random
-from typing import Optional
 
-# --- CONFIG ---
-API_KEY = os.getenv("API_KEY")
-API_URL = "https://services.rainbet.com/v1/external/affiliates"
-DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
-USERS_FILE = "users.json"  # Datei zur Speicherung der Verknüpfungen
-
-# Bot-Setup mit den notwendigen Intents
+# Initialize the bot
 intents = discord.Intents.default()
-intents.message_content = True  # Aktiviert den Zugriff auf Nachrichteninhalte
+intents.messages = True
 bot = commands.Bot(command_prefix="!", intents=intents)
-tree = bot.tree  # Für Slash Commands
 
-# Globale Variablen für den Leaderboard-Zeitraum
-current_leaderboard_start_date = None
-current_leaderboard_end_date = None
+# Your API key from Rainbet (use the environment variable)
+API_KEY = os.getenv("API_KEY")
+DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 
-# Funktionen zur Speicherung und zum Laden der Benutzerzuordnung
-def load_users():
-    if not os.path.exists(USERS_FILE):
-        with open(USERS_FILE, "w") as f:
-            json.dump({}, f, indent=4)
-    with open(USERS_FILE, "r") as f:
-        return json.load(f)
+# SQLite database setup for milestones with roles
+DB_FILE = "affiliate_bot.db"
+
+# Function to get a database connection
+def get_db_connection():
+    conn = sqlite3.connect(DB_FILE)
+    return conn
+
+# Function to initialize the database and tables for milestones
+def init_db():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    # Create table for milestones if it doesn't exist (now with roles)
+    cursor.execute('''CREATE TABLE IF NOT EXISTS milestones (
+                        milestone INTEGER PRIMARY KEY,
+                        reward TEXT NOT NULL,
+                        role_name TEXT NOT NULL
+                    )''')
     
-def save_users(users):
-    with open(USERS_FILE, "w") as f:
-        json.dump(users, f, indent=4)
+    conn.commit()
+    conn.close()
 
-# Funktion, um den Leaderboard-Zeitraum manuell zu setzen
-def set_leaderboard_for_dates(start_date_str: str, end_date_str: str):
-    global current_leaderboard_start_date, current_leaderboard_end_date
-    try:
-        current_leaderboard_start_date = datetime.datetime.strptime(start_date_str, "%Y-%m-%d").date()
-        current_leaderboard_end_date = datetime.datetime.strptime(end_date_str, "%Y-%m-%d").date()
-        if current_leaderboard_end_date < current_leaderboard_start_date:
-            raise ValueError("The end date cannot be before the start date.")
-    except ValueError as e:
-        raise ValueError(f"Invalid date format. Please use YYYY-MM-DD. Error: {e}")
+# Function to add or update a milestone with role
+def set_milestone(milestone, reward, role_name):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("REPLACE INTO milestones (milestone, reward, role_name) VALUES (?, ?, ?)", (milestone, reward, role_name))
+    conn.commit()
+    conn.close()
 
-# Hilfsfunktion: Formatierung des Leaderboards
-# Neue Formatierungsfunktion mit Tickets
-def format_leaderboard(data):
-    affiliates = data.get("affiliates", [])
-    sorted_data = sorted(
-        affiliates, key=lambda x: float(x.get("wagered_amount", "0")), reverse=True
-    )
+# Function to load all milestones
+def load_milestones():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT milestone, reward, role_name FROM milestones")
+    milestones = cursor.fetchall()
+    conn.close()
+    return {milestone: {"reward": reward, "role_name": role_name} for milestone, reward, role_name in milestones}
 
-    lines = []
-    for i, entry in enumerate(sorted_data[:5]):
-        medal = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"][i]
-        wagered = float(entry.get("wagered_amount", "0"))
-        tickets = int(wagered // 100)
-        lines.append(f"{medal} {entry['username']} – ${wagered:,.2f} wagered ({tickets} 🎟️)")
-    return "\n".join(lines)
-
-# ADMIN-ONLY leaderboard command
-@tree.command(name="leaderboard", description="Admin only – show & update the leaderboard.")
-@app_commands.checks.has_permissions(administrator=True)
-async def leaderboard(interaction: discord.Interaction):
-    await send_leaderboard_embed(interaction.channel, interaction=interaction)
-
-
-# Hilfsfunktion: Rangermittlung anhand eines Benutzernamens
-def get_user_rank(data, username: str):
-    affiliates = data.get("affiliates", [])
-    sorted_data = sorted(
-        affiliates, key=lambda x: float(x.get("wagered_amount", "0")), reverse=True
-    )
-    for i, entry in enumerate(sorted_data, start=1):
-        if entry["username"].lower() == username.lower():
-            return i, float(entry["wagered_amount"])
-    return None, 0
-
-# Asynchrone Funktion, um Daten von der API zu holen
-async def fetch_api_data(params: dict):
-    async with aiohttp.ClientSession() as session:
-        async with session.get(API_URL, params=params) as response:
-            response.raise_for_status()
-            try:
-                result = await response.json()
-            except Exception:
-                result = await response.text()
-            print("DEBUG: API response:", result)  # Debug-Ausgabe; später entfernen
-            return result
-
-
-# Slash Command (Admin): Setzt den Leaderboard-Zeitraum für einen benutzerdefinierten Zeitraum
-@tree.command(name="setleaderboard", description="Set the leaderboard period and prizes (Admin only)")
-@app_commands.checks.has_permissions(administrator=True)
-async def set_leaderboard(
-    interaction: discord.Interaction,
-    start_date: str,
-    end_date: str,
-    prize_1st: str,
-    prize_2nd: str,
-    prize_3rd: str,
-    prize_4th: str,
-    prize_5th: str,
-    bonus_threshold: Optional[float] = None,
-    bonus_reward: Optional[str] = None
-):
-    leaderboard_path = "leaderboard.json"
-
-    # Create JSON if it doesn't exist
-    if not os.path.exists(leaderboard_path):
-        with open(leaderboard_path, "w") as f:
-            json.dump({}, f)
-
-    data = {
-        "start_at": start_date,
-        "end_at": end_date,
-        "prizes": {
-            "1st": prize_1st,
-            "2nd": prize_2nd,
-            "3rd": prize_3rd,
-            "4th": prize_4th,
-            "5th": prize_5th,
-            "bonus_threshold": bonus_threshold,
-            "bonus_reward": bonus_reward
-        }
-    }
-
-    with open(leaderboard_path, "w") as f:
-        json.dump(data, f, indent=4)
-
-    await interaction.response.send_message(
-        f"✅ Leaderboard set from **{start_date}** to **{end_date}** with updated prizes!"
-    )
-
-@tree.command(
-    name="pullwinners",
-    description="(Admin) Draw lottery winners for the current leaderboard."
-)
-@app_commands.checks.has_permissions(administrator=True)
-async def pullwinners(interaction: discord.Interaction):
-    leaderboard_path = "leaderboard.json"
-    if not os.path.exists(leaderboard_path):
-        await interaction.response.send_message("❌ The leaderboard is not set yet.")
-        return
-
-    # Lade Zeitrahmen & Preise
-    with open(leaderboard_path, "r") as f:
-        lb = json.load(f)
-    start_date = lb.get("start_at")
-    end_date = lb.get("end_at")
-    prizes = lb.get("prizes", {})
-
-    # API-Daten holen
-    params = {"start_at": start_date, "end_at": end_date, "key": API_KEY}
-    data = await fetch_api_data(params)
-    if isinstance(data, str) or not data.get("affiliates"):
-        return await interaction.response.send_message("❌ No leaderboard data available.")
-
-    # Tickets pro User berechnen
-    ticket_map = {}
-    for entry in data["affiliates"]:
-        user = entry["username"]
-        wagered = float(entry.get("wagered_amount", "0"))
-        tickets = int(wagered // 100)
-        if tickets > 0:
-            ticket_map[user] = tickets
-
-    if not ticket_map:
-        return await interaction.response.send_message("❌ No tickets have been earned. Cannot draw winners.")
-
-    # Lostopf bauen (einträge proportional zu Tickets)
-    ticket_pool = []
-    for user, tickets in ticket_map.items():
-        ticket_pool += [user] * tickets
-
-    # Gewinner ziehen (5 Plätze oder weniger, ohne Zurücklegen)
-    winners = []
-    for _ in range(min(5, len(ticket_map))):
-        winner = random.choice(ticket_pool)
-        winners.append(winner)
-        # alle Lose dieses Gewinners entfernen
-        ticket_pool = [u for u in ticket_pool if u != winner]
-
-    # Nutzer-Mapping für Discord-Mentions
-    users = load_users()
-    inv_map = {v.lower(): k for k, v in users.items()}
-
-    # Embed bauen
-    embed = discord.Embed(
-        title="🎉 Leaderboard Lottery Winners",
-        description=f"📅 {start_date} to {end_date}",
-        color=discord.Color.green()
-    )
-    medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
-    places = ["1st", "2nd", "3rd", "4th", "5th"]
-    for i, winner in enumerate(winners):
-        medal = medals[i]
-        prize = prizes.get(places[i], "TBA")
-        tickets = ticket_map[winner]
-        disc_id = inv_map.get(winner.lower())
-        mention = f"<@{disc_id}>" if disc_id else winner
-        embed.add_field(
-            name=f"{medal} {mention}",
-            value=f"🎟️ Tickets: {tickets}  •  🏆 Prize: {prize}",
-            inline=False
-        )
-
-    await interaction.response.send_message(embed=embed)
-
-
-@tree.command(name="info", description="Information about the current leaderboard")
-async def info(interaction: discord.Interaction):
-    leaderboard_data = {}
-    if os.path.exists("leaderboard.json"):
-        with open("leaderboard.json", "r") as f:
-            leaderboard_data = json.load(f)
-
-    prizes = leaderboard_data.get("prizes", {})
-    prize1 = prizes.get("1st", "TBA")
-    prize2 = prizes.get("2nd", "TBA")
-    prize3 = prizes.get("3rd", "TBA")
-    prize4 = prizes.get("4th", "TBA")
-    prize5 = prizes.get("5th", "TBA")
-    bonus_threshold = prizes.get("bonus_threshold")
-    bonus_reward = prizes.get("bonus_reward")
-
-    bonus_line = ""
-    if bonus_threshold and bonus_reward:
-        bonus_line = f"🎁 Bonus – {bonus_reward}$ for {bonus_threshold}$+ wagered"
-
-    embed = discord.Embed(
-        title="🎰 Rainbet Leaderboard Challenge",
-        description="Track your wagers. Climb the leaderboard. Win real cash!\nNow with a **lottery system**!",
-        color=discord.Color.blurple()
-    )
-    embed.add_field(
-        name="📝 How to join",
-        value="Register at [rainbet.com](https://rainbet.com/?r=casynetic) or use **code `casynetic`**.\nThen use `/linkrainbet` to link your username.",
-        inline=False
-    )
-    embed.add_field(
-        name="🎟️ Ticket System",
-        value="For every **$100 wagered**, you earn **1 ticket**.\nWinners will be **randomly drawn** at the end – more tickets = higher chances.",
-        inline=False
-    )
-    embed.add_field(
-        name="🏆 Prizes",
-        value=f"🥇 {prize1}\n🥈 {prize2}\n🥉 {prize3}\n4️⃣ {prize4}\n5️⃣ {prize5}\n{bonus_line}",
-        inline=False
-    )
-
-    if leaderboard_data.get("start_at") and leaderboard_data.get("end_at"):
-        embed.add_field(
-            name="🗓️ Date Range",
-            value=f"{leaderboard_data['start_at']} to {leaderboard_data['end_at']}",
-            inline=False
-        )
-
-    embed.set_footer(text="Use /leaderboard (admin) to check current standings")
-
-    await interaction.response.send_message(embed=embed)
-
-
-
-# Slash Command: Verknüpfe deinen Discord-Account mit deinem Rainbet-Benutzernamen
-@tree.command(name="linkrainbet", description="Link your Discord account to your Rainbet username.")
-async def linkrainbet(interaction: discord.Interaction, rainbet_username: str):
-    """
-    Link your Discord account with your Rainbet username.
-    Parameter:
-    - rainbet_username (str): Your Rainbet username.
-    """
-    users = load_users()
-    users[str(interaction.user.id)] = rainbet_username
-    save_users(users)
-    await interaction.response.send_message(
-        f"🔗 {interaction.user.mention}, your account is now linked to Rainbet username: **{rainbet_username}**."
-    )
-
-from discord.ext import tasks
-
-async def send_leaderboard_embed(destination, interaction=None):
-    leaderboard_path = "leaderboard.json"
-    
-    if not os.path.exists(leaderboard_path):
-        message = "❌ The leaderboard is not set yet. Please contact an admin."
-        if interaction:
-            await interaction.response.send_message(message)
-        else:
-            await destination.send(message)
-        return
-
-    with open(leaderboard_path, "r") as f:
-        leaderboard_data = json.load(f)
-
-    start_date = leaderboard_data.get("start_at")
-    end_date = leaderboard_data.get("end_at")
-    prizes = leaderboard_data.get("prizes", {})
-    prize1 = prizes.get("1st", "TBA")
-    prize2 = prizes.get("2nd", "TBA")
-    prize3 = prizes.get("3rd", "TBA")
-    prize4 = prizes.get("4th", "TBA")
-    prize5 = prizes.get("5th", "TBA")
-    bonus_threshold = prizes.get("bonus_threshold")
-    bonus_reward = prizes.get("bonus_reward")
-    bonus_line = f"🎁 Bonus – {bonus_reward}$ for {bonus_threshold}$+ wagered" if bonus_threshold and bonus_reward else ""
-
+# Function to get the wager stats from the Rainbet API
+def get_wager_stats(rainbet_username, start_at, end_at):
+    url = f"https://services.rainbet.com/v1/external/affiliates"
     params = {
-        "start_at": start_date,
-        "end_at": end_date,
-        "key": API_KEY
+        'start_at': start_at,
+        'end_at': end_at,
+        'key': API_KEY
     }
+    response = requests.get(url, params=params)
+    data = response.json()
 
-    try:
-        data = await fetch_api_data(params)
-        if isinstance(data, str) or not data.get("affiliates"):
-            msg = "❌ No leaderboard data available for the specified period."
-            if interaction:
-                await interaction.response.send_message(msg)
-            else:
-                await destination.send(msg)
-            return
+    # Filter the data to match the user's Rainbet username
+    for affiliate in data['affiliates']:
+        if affiliate['username'] == rainbet_username:
+            return affiliate['wager']  # Return the total wager amount for this affiliate
+    return None
 
-        total_wagered = sum(float(a.get("wagered_amount", "0")) for a in data["affiliates"])
-
-        embed = discord.Embed(
-            title=f"🏆 Rainbet Leaderboard – {start_date} to {end_date}",
-            description=format_leaderboard(data),
-            color=discord.Color.gold()
-        )
-        embed.set_footer(text=f"Updated: {datetime.datetime.now(datetime.UTC).strftime('%d %B %H:%M UTC')}")
-        embed.add_field(
-            name="💰 Total Wagered",
-            value=f"${total_wagered:,.2f}",
-            inline=True
-        )
-        embed.add_field(
-            name="🏆 Prizes",
-            value=f"🥇 {prize1}\n🥈 {prize2}\n🥉 {prize3}\n4️⃣ {prize4}\n5️⃣ {prize5}\n{bonus_line}",
-            inline=False
-        )
-        embed.add_field(
-            name="🗓️ Date Range",
-            value=f"{start_date} to {end_date}",
-            inline=False
-        )
-
-        if interaction:
-            await interaction.response.send_message(embed=embed)
-        else:
-            await destination.send(embed=embed)
-
-    except Exception as e:
-        error_msg = f"❌ Error fetching leaderboard: {e}"
-        print(error_msg)
-        if interaction:
-            await interaction.response.send_message(error_msg)
-        else:
-            await destination.send(error_msg)
-
-
-@tasks.loop(hours=24)
-async def daily_leaderboard_post():
-    await bot.wait_until_ready()
-    channel_id = os.getenv("LEADERBOARD_CHANNEL_ID")
-    if not channel_id:
-        print("LEADERBOARD_CHANNEL_ID not set.")
-        return
-    channel = bot.get_channel(int(channel_id))
-    if channel:
-        await send_leaderboard_embed(channel)
-    else:
-        print(f"Could not find channel with ID {channel_id}")
-
-
-
-# on_ready Event: Synchronisiert die Slash Commands bei Start
+# Registering slash commands when the bot is ready
 @bot.event
 async def on_ready():
-    await tree.sync()  # Globaler Sync; alternativ guild-spezifisch zum Testen
-    print(f"{bot.user} is online and slash commands are synced!")
-    daily_leaderboard_post.start()
+    # Initialize the database on bot startup
+    init_db()
+    # Register the commands in the application (slash commands)
+    try:
+        await bot.tree.sync()
+        print(f'Logged in as {bot.user}')
+    except Exception as e:
+        print(f"Error syncing commands: {e}")
 
+# Command to set a milestone (with a reward and role) as an admin (slash command)
+@bot.tree.command(name="set_milestone", description="Set a milestone and corresponding reward and role.")
+async def set_milestone_cmd(interaction: discord.Interaction, milestone: int, reward: str, role_name: str):
+    """Set a milestone (wager amount), its reward (role or prize), and the role name."""
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("You do not have permission to set milestones.")
+        return
+
+    set_milestone(milestone, reward, role_name)
+    await interaction.response.send_message(f"Milestone {milestone}, reward '{reward}', and role '{role_name}' have been set.")
+
+# Command to view the current milestones (slash command)
+@bot.tree.command(name="view_milestones", description="View the current milestones, rewards, and roles.")
+async def view_milestones(interaction: discord.Interaction):
+    """View all configured milestones, rewards, and role names."""
+    milestones = load_milestones()
+    
+    if not milestones:
+        await interaction.response.send_message("No milestones have been set yet.")
+        return
+    
+    # Format the milestones and rewards for display
+    milestone_list = "\n".join([f"Milestone {milestone}: {reward['reward']} (Role: {reward['role_name']})" for milestone, reward in milestones.items()])
+    
+    await interaction.response.send_message(f"Current milestones:\n{milestone_list}")
+
+# Command to get the wager stats and show the progress bar (slash command)
+@bot.tree.command(name="progress", description="Check your wager progress using your Rainbet username.")
+async def progress(interaction: discord.Interaction, rainbet_username: str):
+    """Get the progress of a user based on wager stats."""
+    # Set fixed start date (15.04.2025) and dynamic end date (current date)
+    start_at = "2025-04-15"
+    end_at = datetime.now().strftime("%Y-%m-%d")  # Get current date in YYYY-MM-DD format
+    
+    # Fetch the wager data
+    wager = get_wager_stats(rainbet_username, start_at, end_at)
+    
+    # If the Rainbet username was not found
+    if wager is None:
+        dm = await interaction.user.create_dm()
+        await dm.send(f"Error: We could not find any data for the Rainbet username `{rainbet_username}`. Please ensure the username is correct.")
+        return
+    
+    # Load milestones
+    milestones = load_milestones()
+    
+    # Find the appropriate milestone
+    closest_milestone = None
+    for milestone in sorted(milestones.keys(), reverse=True):
+        if wager >= milestone:
+            closest_milestone = milestone
+            break
+    
+    # If a milestone was reached, assign reward and send instructions
+    if closest_milestone:
+        reward = milestones[closest_milestone]['reward']
+        role_name = milestones[closest_milestone]['role_name']
+        
+        # Example: Assigning a role as a reward
+        role = discord.utils.get(interaction.guild.roles, name=role_name)
+        if role:
+            await interaction.user.add_roles(role)
+        
+        # Send the progress, reward details, and instructions via DM
+        dm = await interaction.user.create_dm()
+        await dm.send(f"Your wager progress: {wager}\nMilestone: {closest_milestone} (Reward: {reward}, Role: {role_name})\n\nPlease open a ticket to claim your prize: {reward}.")
+    else:
+        await interaction.response.send_message(f"Your wager progress is {wager}. No milestone reached yet.")
+
+# Run the bot with your token
 bot.run(DISCORD_TOKEN)
