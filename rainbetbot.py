@@ -55,9 +55,6 @@ async def on_ready():
 
 import requests
 
-@from datetime import datetime
-import requests
-
 @bot.tree.command(name="link", description="Link your Rainbet and Kick accounts.")
 @app_commands.describe(rainbet="Your Rainbet username", kick="Your Kick username")
 async def link(interaction: discord.Interaction, rainbet: str, kick: str):
