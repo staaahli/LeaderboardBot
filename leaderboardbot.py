@@ -15,7 +15,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 API_KEY = os.getenv("API_KEY")
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 
-# SQLite database setup for milestones with roles
+# SQLite database setup for milestones with role_ids
 DB_FILE = "affiliate_bot.db"
 
 # Function to get a database connection
@@ -28,21 +28,21 @@ def init_db():
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    # Create table for milestones if it doesn't exist (now with roles)
+    # Create table for milestones if it doesn't exist (now with role_id)
     cursor.execute('''CREATE TABLE IF NOT EXISTS milestones (
                         milestone INTEGER PRIMARY KEY,
                         reward TEXT NOT NULL,
-                        role_name TEXT NOT NULL
+                        role_id INTEGER NOT NULL
                     )''')
     
     conn.commit()
     conn.close()
 
-# Function to add or update a milestone with role
-def set_milestone(milestone, reward, role_name):
+# Function to add or update a milestone with role_id
+def set_milestone(milestone, reward, role_id):
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("REPLACE INTO milestones (milestone, reward, role_name) VALUES (?, ?, ?)", (milestone, reward, role_name))
+    cursor.execute("REPLACE INTO milestones (milestone, reward, role_id) VALUES (?, ?, ?)", (milestone, reward, role_id))
     conn.commit()
     conn.close()
 
@@ -50,10 +50,10 @@ def set_milestone(milestone, reward, role_name):
 def load_milestones():
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT milestone, reward, role_name FROM milestones")
+    cursor.execute("SELECT milestone, reward, role_id FROM milestones")
     milestones = cursor.fetchall()
     conn.close()
-    return {milestone: {"reward": reward, "role_name": role_name} for milestone, reward, role_name in milestones}
+    return {milestone: {"reward": reward, "role_id": role_id} for milestone, reward, role_id in milestones}
 
 # Function to get the wager stats from the Rainbet API
 def get_wager_stats(rainbet_username, start_at, end_at):
@@ -84,21 +84,23 @@ async def on_ready():
     except Exception as e:
         print(f"Error syncing commands: {e}")
 
-# Command to set a milestone (with a reward and role) as an admin (slash command)
+# Command to set a milestone (with a reward and role_id) as an admin (slash command)
 @bot.tree.command(name="set_milestone", description="Set a milestone and corresponding reward and role.")
-async def set_milestone_cmd(interaction: discord.Interaction, milestone: int, reward: str, role_name: str):
-    """Set a milestone (wager amount), its reward (role or prize), and the role name."""
-    if not interaction.user.guild_permissions.administrator:
+async def set_milestone_cmd(interaction: discord.Interaction, milestone: int, reward: str, role: discord.Role):
+    """Set a milestone (wager amount), its reward (role or prize), and the role ID."""
+    # Ensure the interaction user exists and check for admin permissions
+    if interaction.user is None or not interaction.user.guild_permissions.administrator:
         await interaction.response.send_message("You do not have permission to set milestones.")
         return
 
-    set_milestone(milestone, reward, role_name)
-    await interaction.response.send_message(f"Milestone {milestone}, reward '{reward}', and role '{role_name}' have been set.")
+    # Set milestone with role_id
+    set_milestone(milestone, reward, role.id)
+    await interaction.response.send_message(f"Milestone {milestone}, reward '{reward}', and role '{role.name}' have been set.")
 
 # Command to view the current milestones (slash command)
 @bot.tree.command(name="view_milestones", description="View the current milestones, rewards, and roles.")
 async def view_milestones(interaction: discord.Interaction):
-    """View all configured milestones, rewards, and role names."""
+    """View all configured milestones, rewards, and role IDs."""
     milestones = load_milestones()
     
     if not milestones:
@@ -106,7 +108,7 @@ async def view_milestones(interaction: discord.Interaction):
         return
     
     # Format the milestones and rewards for display
-    milestone_list = "\n".join([f"Milestone {milestone}: {reward['reward']} (Role: {reward['role_name']})" for milestone, reward in milestones.items()])
+    milestone_list = "\n".join([f"Milestone {milestone}: {reward['reward']} (Role: <@&{reward['role_id']}>)" for milestone, reward in milestones.items()])
     
     await interaction.response.send_message(f"Current milestones:\n{milestone_list}")
 
@@ -140,16 +142,16 @@ async def progress(interaction: discord.Interaction, rainbet_username: str):
     # If a milestone was reached, assign reward and send instructions
     if closest_milestone:
         reward = milestones[closest_milestone]['reward']
-        role_name = milestones[closest_milestone]['role_name']
+        role_id = milestones[closest_milestone]['role_id']
         
         # Example: Assigning a role as a reward
-        role = discord.utils.get(interaction.guild.roles, name=role_name)
+        role = discord.utils.get(interaction.guild.roles, id=role_id)
         if role:
             await interaction.user.add_roles(role)
         
         # Send the progress, reward details, and instructions via DM
         dm = await interaction.user.create_dm()
-        await dm.send(f"Your wager progress: {wager}\nMilestone: {closest_milestone} (Reward: {reward}, Role: {role_name})\n\nPlease open a ticket to claim your prize: {reward}.")
+        await dm.send(f"Your wager progress: {wager}\nMilestone: {closest_milestone} (Reward: {reward}, Role: {role.name})\n\nPlease open a ticket to claim your prize: {reward}.")
     else:
         await interaction.response.send_message(f"Your wager progress is {wager}. No milestone reached yet.")
 
