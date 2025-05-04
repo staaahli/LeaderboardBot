@@ -5,6 +5,7 @@ import os
 import psycopg2
 from datetime import datetime
 import requests
+import random
 
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
@@ -129,7 +130,7 @@ async def edit_milestone(
         )
     except Exception as e:
         await interaction.response.send_message(f"❌ Error editing milestone: {str(e)}", ephemeral=True)
-        
+
 @bot.tree.command(name="list_milestones", description="Admin only – list all current milestones.")
 @app_commands.checks.has_permissions(administrator=True)
 async def list_milestones(interaction: discord.Interaction):
@@ -185,7 +186,7 @@ async def delete_milestone(interaction: discord.Interaction, amount: float):
 async def progress(interaction: discord.Interaction):
     try:
         # Channel restriction
-        ALLOWED_CHANNEL_ID = 1368529610072916078
+        ALLOWED_CHANNEL_ID = 1368529610072916078  # Replace with your actual channel ID
         if interaction.channel_id != ALLOWED_CHANNEL_ID:
             channel_mention = f"<#{ALLOWED_CHANNEL_ID}>"
             await interaction.response.send_message(
@@ -198,20 +199,14 @@ async def progress(interaction: discord.Interaction):
             cur = conn.cursor()
             cur.execute("SELECT rainbet_username FROM account_links WHERE discord_id = %s", (str(interaction.user.id),))
             result = cur.fetchone()
-
             if not result:
-                await interaction.response.send_message("❌ You have not linked a Rainbet account.", ephemeral=True)
+                await interaction.response.send_message("❌ You don't have a linked Rainbet account.", ephemeral=True)
                 return
 
             rainbet_username = result[0]
-
-            # Get all milestones for this guild, ordered by amount
-            cur.execute("""
-                SELECT milestone_amount, reward_role_id, reward_text
-                FROM milestones
-                WHERE guild_id = %s
-                ORDER BY milestone_amount ASC;
-            """, (str(interaction.guild.id),))
+            # Get milestone data
+            cur.execute("SELECT milestone_amount, reward_role_id, reward_text FROM milestones WHERE guild_id = %s",
+                        (str(interaction.guild.id),))
             milestones = cur.fetchall()
 
             if not milestones:
@@ -228,57 +223,73 @@ async def progress(interaction: discord.Interaction):
         data = response.json()
         wagered = None
         for affiliate in data.get("affiliates", []):
-            if affiliate["username"].lower() == rainbet_username.lower():
+            if affiliate["username"] == rainbet_username:
                 wagered = float(affiliate["wagered_amount"])
                 break
 
         if wagered is None:
-            await interaction.response.send_message("❌ No wagering data found for your account.", ephemeral=True)
+            await interaction.response.send_message("❌ Could not find your wager information.", ephemeral=True)
             return
 
-        # Find the next milestone
-        next_milestone = None
+        # Sort milestones to find the highest milestone the user has achieved
+        milestones.sort(key=lambda x: x[0])  # Sort by milestone_amount (ascending)
+
+        # Determine the highest milestone the user has reached
+        highest_reached = None
         for milestone in milestones:
-            if wagered < milestone[0]:  # milestone_amount
-                next_milestone = milestone
+            if wagered >= milestone[0]:
+                highest_reached = milestone
+            else:
                 break
 
-        if next_milestone:
-            milestone_amount, reward_role_id, reward_text = next_milestone
-            progress_ratio = min(wagered / milestone_amount, 1)
-            filled = int(progress_ratio * 20)
-            empty = 20 - filled
-            progress_bar = f"[{'█' * filled}{'—' * empty}]"
+        if not highest_reached:
+            await interaction.response.send_message(f"❌ You haven't reached any milestones yet.\nWagered: `{wagered:.2f}`", ephemeral=True)
+            return
 
-            message = (
-                f"📊 Casynetic VIP Progress for `{rainbet_username}`:\n"
-                f"💰 Wagered: `{wagered:.2f}` / `{milestone_amount}`\n"
-                f"{progress_bar} {int(progress_ratio * 100)}%\n"
-            )
+        highest_amount, highest_role_id, reward_text = highest_reached
 
-            if wagered >= milestone_amount:
-                role = discord.utils.get(interaction.guild.roles, id=int(reward_role_id))
-                if role:
-                    await interaction.user.add_roles(role)
-                    message += (
-                        f"\n🎉 **Milestone reached!** You’ve been granted the role `{role.name}`.\n"
-                        f"🎁 **Reward:** {reward_text}\n"
-                        f"📩 Please open a ticket to claim your reward!"
-                    )
+        # Create progress bar
+        progress_ratio = min(wagered / highest_amount, 1)
+        filled = int(progress_ratio * 20)
+        empty = 20 - filled
+        progress_bar = f"[{'█' * filled}{'—' * empty}]"
 
-        else:
-            # All milestones achieved
-            message = (
-                f"🏆 `{rainbet_username}`, you have reached the **maximum VIP status**!\n"
-                f"💰 Total Wagered: `{wagered:.2f}`\n"
-                f"🎉 There are no further milestones to achieve – amazing work!\n"
-                f"📩 If you haven't yet claimed your final reward, please open a ticket."
-            )
+        # Compose progress message
+        message = (
+            f"📊 Casynetic VIP Progress for `{rainbet_username}`:\n"
+            f"💰 Wagered: `{wagered:.2f}` / `{highest_amount}`\n"
+            f"{progress_bar} {int(progress_ratio * 100)}%\n"
+            f"🎁 Reward: {reward_text}\n"
+        )
+
+        # Check if the user has already reached the milestone
+        if wagered >= highest_amount:
+            role = discord.utils.get(interaction.guild.roles, id=int(highest_role_id))
+            if role and role not in interaction.user.roles:
+                # Remove all previous roles with lower milestone_amount
+                roles_to_remove = []
+                for amount, role_id, _ in milestones:
+                    if amount < highest_amount:
+                        role_to_remove = discord.utils.get(interaction.guild.roles, id=int(role_id))
+                        if role_to_remove and role_to_remove in interaction.user.roles:
+                            roles_to_remove.append(role_to_remove)
+
+                if roles_to_remove:
+                    await interaction.user.remove_roles(*roles_to_remove)
+
+                # Assign the new role
+                await interaction.user.add_roles(role)
+                message += (
+                    f"\n🎉 **Milestone reached!** You’ve been granted the role `{role.name}`.\n"
+                    f"📩 Please open a ticket to claim your reward!"
+                )
 
         await interaction.response.send_message(message, ephemeral=True)
 
     except Exception as e:
         await interaction.response.send_message(f"❌ An error occurred: {str(e)}", ephemeral=True)
+
+
 
 
 @bot.tree.command(name="link", description="Link your Rainbet and Kick accounts.")
@@ -374,6 +385,137 @@ async def accinfo(interaction: discord.Interaction, user: discord.User):
             f"👤 Linked accounts for {user.mention}:\nRainbet: `{rainbet}`\nKick: `{kick}`", ephemeral=True
         )
 
+#region tournaments
+bot.tournament_state = {
+    "participants": set(),
+    "final_four": [],
+    "hall_of_fame_message_id": None
+}
+
+# Ensure database table exists
+def init_tournament_db():
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS tournament_winners (
+                    user_id TEXT PRIMARY KEY,
+                    wins INTEGER NOT NULL
+                );
+            """)
+            conn.commit()
+
+async def update_hall_of_fame():
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT user_id, wins FROM tournament_winners ORDER BY wins DESC LIMIT 10;")
+            rows = cursor.fetchall()
+    HALL_OF_FAME_CHANNEL_ID= 1368860827695972372 
+    channel = bot.get_channel(HALL_OF_FAME_CHANNEL_ID)
+    if not channel:
+        return
+
+    description = "**🏆 Hall of Fame – Tournament Winners 🏆**\n\n"
+    for i, (user_id, wins) in enumerate(rows, start=1):
+        description += f"{i}. <@{user_id}> — **{wins}** wins\n"
+
+    # Try to edit existing message, otherwise send new one
+    try:
+        if bot.tournament_state["hall_of_fame_message_id"]:
+            msg = await channel.fetch_message(bot.tournament_state["hall_of_fame_message_id"])
+            await msg.edit(content=description)
+        else:
+            msg = await channel.send(description)
+            bot.tournament_state["hall_of_fame_message_id"] = msg.id
+    except:
+        msg = await channel.send(description)
+        bot.tournament_state["hall_of_fame_message_id"] = msg.id
+
+
+
+@bot.tree.command(name="tournament_start", description="Start a slot tournament (4 players).")
+@app_commands.checks.has_permissions(administrator=True)
+async def tournament_start(interaction: discord.Interaction):
+    init_tournament_db()
+    bot.tournament_state["participants"].clear()
+    bot.tournament_state["final_four"] = []
+    EMOJI = "🎰" 
+
+    msg = await interaction.channel.send("🎰 **React to join the slot tournament!**\n"
+    "Only 4 will be randomly selected.\n\n"
+    "🏆 The winner receives a **$5 tip**!\n"
+    "💰 If both bonus buys are profitable, the prize will be **doubled to $10**!")
+    await msg.add_reaction(EMOJI)
+    bot.tournament_state["reaction_message_id"] = msg.id
+
+    await interaction.response.send_message("✅ Tournament registration started.", ephemeral=True)
+
+@bot.tree.command(name="tournament_close", description="Close registration and draw 4 random players.")
+@app_commands.checks.has_permissions(administrator=True)
+async def tournament_close(interaction: discord.Interaction):
+    participants = list(bot.tournament_state["participants"])
+    if len(participants) < 4:
+        await interaction.response.send_message("⚠️ Not enough participants (need at least 4).", ephemeral=True)
+        return
+
+    selected = random.sample(participants, 4)
+    bot.tournament_state["final_four"] = selected
+
+    mentions = " ".join(f"<@{uid}>" for uid in selected)
+    await interaction.channel.send(
+        f"🎯 **Selected participants:** {mentions}\n"
+        f"Please appear in the stream within the next **5 minutes**, or you will be replaced."
+    )
+
+    await interaction.response.send_message("✅ Final four selected.", ephemeral=True)
+
+
+@bot.tree.command(name="tournament_draw_backup", description="Draw a backup participant in case someone no-shows.")
+@app_commands.checks.has_permissions(administrator=True)
+async def tournament_draw_backup(interaction: discord.Interaction):
+    remaining = list(bot.tournament_state["participants"] - set(bot.tournament_state["final_four"]))
+    if not remaining:
+        await interaction.response.send_message("⚠️ No remaining participants available.", ephemeral=True)
+        return
+
+    backup = random.choice(remaining)
+    bot.tournament_state["final_four"].append(backup)
+
+    await interaction.channel.send(
+        f"🆕 Backup participant selected: <@{backup}>\nPlease appear in the stream within the next **5 minutes**!"
+    )
+
+    await interaction.response.send_message("✅ Backup participant selected.", ephemeral=True)
+
+@bot.tree.command(name="tournament_winner", description="Set the winner of the tournament final.")
+@app_commands.checks.has_permissions(administrator=True)
+@app_commands.describe(user="The winner of the final round")
+async def tournament_winner(interaction: discord.Interaction, user: discord.User):
+    init_tournament_db()
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                INSERT INTO tournament_winners (user_id, wins)
+                VALUES (%s, 1)
+                ON CONFLICT (user_id) DO UPDATE SET wins = tournament_winners.wins + 1;
+            """, (str(user.id),))
+            conn.commit()
+
+    await update_hall_of_fame()
+    await interaction.channel.send(f"🏆 Congratulations <@{user.id}>! You are the **Tournament Champion**! 🎉")
+
+    await interaction.response.send_message("✅ Winner recorded and Hall of Fame updated.", ephemeral=True)
+
+@bot.event
+async def on_raw_reaction_add(payload):
+    EMOJI = "🎰" 
+    if payload.message_id != bot.tournament_state.get("reaction_message_id"):
+        return
+    if str(payload.emoji) != EMOJI:
+        return
+    bot.tournament_state["participants"].add(payload.user_id)
+
+#endregion
+
 # ===== Error Handling =====
 @bot.tree.error
 async def on_app_command_error(interaction: discord.Interaction, error: Exception):
@@ -382,6 +524,8 @@ async def on_app_command_error(interaction: discord.Interaction, error: Exceptio
     else:
         await interaction.response.send_message("❌ An unexpected error occurred.", ephemeral=True)
         raise error
+    
+
 
 # ===== Start Bot =====
 bot.run(os.getenv("DISCORD_TOKEN"))
