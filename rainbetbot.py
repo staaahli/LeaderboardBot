@@ -108,7 +108,7 @@ async def progress(interaction: discord.Interaction):
         # Get linked Rainbet username from DB
         with get_connection() as conn:
             cur = conn.cursor()
-            cur.execute("SELECT rainbet FROM accounts WHERE discord_id = %s", (str(interaction.user.id),))
+            cur.execute("SELECT rainbet_username FROM account_links WHERE discord_id = %s", (str(interaction.user.id),))
             result = cur.fetchone()
             rainbet_username = result[0]
             # Get milestone data
