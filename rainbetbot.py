@@ -10,6 +10,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ===== Database Setup =====
 DATABASE_URL = os.getenv("DATABASE_URL")  # Railway automatically sets this
+API_KEY = os.getenv("API_KEY")  # Assuming you have an API key as an environment variable
 
 def get_connection():
     return psycopg2.connect(DATABASE_URL, sslmode='require')
@@ -60,7 +61,6 @@ import requests
 async def link(interaction: discord.Interaction, rainbet: str, kick: str):
     try:
         # API call to check if the Rainbet account is under your affiliate code
-        API_KEY = os.getenv("RAINBET_API_KEY")  # Assuming you have an API key as an environment variable
         url = f"https://services.rainbet.com/v1/external/affiliates?start_at=2025-04-15&end_at={datetime.now().strftime('%Y-%m-%d')}&key={API_KEY}"
 
         response = requests.get(url)
