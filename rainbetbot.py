@@ -11,7 +11,8 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 # ===== Database Setup =====
 DATABASE_URL = os.getenv("DATABASE_URL")  # Railway automatically sets this
 API_KEY = os.getenv("API_KEY")  # Assuming you have an API key as an environment variable
-
+# Replace with your actual allowed channel ID
+ALLOWED_COMMAND_CHANNEL_ID_FOR_LINK = 1368529085994893372  # <-- deinen Channel ID hier eintragen
 def get_connection():
     return psycopg2.connect(DATABASE_URL, sslmode='require')
 
@@ -59,44 +60,40 @@ import requests
 @bot.tree.command(name="link", description="Link your Rainbet and Kick accounts.")
 @app_commands.describe(rainbet="Your Rainbet username", kick="Your Kick username")
 async def link(interaction: discord.Interaction, rainbet: str, kick: str):
-    try:
-        # API call to check if the Rainbet account is under your affiliate code
-        url = f"https://services.rainbet.com/v1/external/affiliates?start_at=2025-04-15&end_at={datetime.now().strftime('%Y-%m-%d')}&key={API_KEY}"
+    if interaction.channel.id != ALLOWED_COMMAND_CHANNEL_ID_FOR_LINK:
+        await interaction.response.send_message(
+            f"❌ This command can only be used in <#{ALLOWED_COMMAND_CHANNEL_ID_FOR_LINK}>.",
+            ephemeral=True
+        )
+        return
 
+    try:
+        url = f"https://services.rainbet.com/v1/external/affiliates?start_at=2025-04-15&end_at={datetime.now().strftime('%Y-%m-%d')}&key={API_KEY}"
         response = requests.get(url)
         if response.status_code != 200:
             await interaction.response.send_message("❌ Failed to fetch data from the Rainbet API.", ephemeral=True)
             return
-        
-        # Check if the Rainbet account exists under your affiliate code
+
         data = response.json()
         found = False
         for affiliate in data.get("affiliates", []):
-            if affiliate["username"] == rainbet:
+            if affiliate["username"].lower() == rainbet.lower():
                 found = True
                 break
-        
+
         if not found:
-            # If the Rainbet account is not found under your code, return an error message
             await interaction.response.send_message(
-                "❌ The provided Rainbet account is not found under our affiliate code. Please check the username.",
-                ephemeral=True
+                "❌ The provided Rainbet account is not under our affiliate code.", ephemeral=True
             )
             return
-        
-        # If the account is valid, assign a role (assume roles are predefined)
-        role_id = 1368532715246452806  # Replace with the correct role ID to be assigned
 
+        role_id = 1368532715246452806  # Replace with the real role ID
         role = discord.utils.get(interaction.guild.roles, id=role_id)
-
         if role:
-            # Assign the role to the user
             await interaction.user.add_roles(role)
-        
-        # Save the link to the database
+
         link_accounts(str(interaction.user.id), rainbet, kick)
-        
-        # Only send the final success message once
+
         await interaction.response.send_message(
             f"✅ Successfully linked your accounts!\nRainbet: `{rainbet}`\nKick: `{kick}`\nRole `{role.name}` assigned.",
             ephemeral=True
@@ -105,17 +102,22 @@ async def link(interaction: discord.Interaction, rainbet: str, kick: str):
         await interaction.response.send_message(f"❌ An error occurred: {str(e)}", ephemeral=True)
 
 
+
 @bot.tree.command(name="unlink", description="Unlink your Rainbet and Kick accounts.")
 async def unlink(interaction: discord.Interaction):
-    with get_connection() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute("DELETE FROM account_links WHERE discord_id = %s;", (str(interaction.user.id),))
-            if cursor.rowcount == 0:
-                await interaction.response.send_message("⚠️ No linked account found to unlink.", ephemeral=True)
-            else:
-                conn.commit()
-                await interaction.response.send_message("✅ Your accounts have been unlinked.", ephemeral=True)
- 
+    if interaction.channel.id != ALLOWED_COMMAND_CHANNEL_ID_FOR_LINK:
+        await interaction.response.send_message(
+            f"❌ This command can only be used in <#{ALLOWED_COMMAND_CHANNEL_ID_FOR_LINK}>.",
+            ephemeral=True
+        )
+        return
+
+    try:
+        unlink_accounts(str(interaction.user.id))
+        await interaction.response.send_message("✅ Your accounts have been unlinked.", ephemeral=True)
+    except Exception as e:
+        await interaction.response.send_message(f"❌ An error occurred: {str(e)}", ephemeral=True)
+
 @bot.tree.command(name="accinfo", description="Admin only – show linked account info for a user.")
 @app_commands.describe(user="The user you want to query.")
 @app_commands.checks.has_permissions(administrator=True)
