@@ -1,1 +1,1 @@
-worker: python leaderboardbot.py
+worker: python rainbetbot.py
