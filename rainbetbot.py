@@ -71,7 +71,7 @@ async def link(interaction: discord.Interaction, rainbet: str, kick: str):
         # Check if the Rainbet account exists under your affiliate code
         data = response.json()
         found = False
-        for affiliate in data.get("data", []):
+        for affiliate in data.get("affiliates", []):
             if affiliate["username"] == rainbet:
                 found = True
                 break
