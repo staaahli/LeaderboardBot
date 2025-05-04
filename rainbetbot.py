@@ -58,45 +58,134 @@ async def on_ready():
     print(f"✅ Bot is online as {bot.user}")
 
 # ===== Commands =====
-@bot.tree.command(name="set_milestone", description="Admin only – set wager milestone, reward role and prize description.")
+@bot.tree.command(name="set_milestone", description="Admin only – add a new wager milestone.")
 @app_commands.describe(amount="Wager amount to reach milestone", role="Reward role to assign", prize="Description of the reward")
 @app_commands.checks.has_permissions(administrator=True)
 async def set_milestone(interaction: discord.Interaction, amount: float, role: discord.Role, prize: str):
     try:
         with get_connection() as conn:
             cur = conn.cursor()
-            # Ensure table exists
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS milestones (
-                    guild_id TEXT PRIMARY KEY,
-                    milestone_amount REAL,
-                    reward_role_id TEXT,
-                    reward_text TEXT
+                    id SERIAL PRIMARY KEY,
+                    guild_id TEXT NOT NULL,
+                    milestone_amount REAL NOT NULL,
+                    reward_role_id TEXT NOT NULL,
+                    reward_text TEXT NOT NULL
                 );
             """)
-            # Insert or update milestone data
             cur.execute("""
                 INSERT INTO milestones (guild_id, milestone_amount, reward_role_id, reward_text)
-                VALUES (%s, %s, %s, %s)
-                ON CONFLICT (guild_id) DO UPDATE
-                SET milestone_amount = EXCLUDED.milestone_amount,
-                    reward_role_id = EXCLUDED.reward_role_id,
-                    reward_text = EXCLUDED.reward_text;
+                VALUES (%s, %s, %s, %s);
             """, (str(interaction.guild.id), amount, str(role.id), prize))
             conn.commit()
 
         await interaction.response.send_message(
-            f"✅ Milestone set to `{amount}` wager.\n🎖️ Role: `{role.name}`\n🎁 Reward: `{prize}`",
+            f"✅ Milestone of `{amount}` added!\n🎖️ Role: `{role.name}`\n🎁 Reward: {prize}",
             ephemeral=True
         )
     except Exception as e:
-        await interaction.response.send_message(f"❌ Error setting milestone: {str(e)}", ephemeral=True)
+        await interaction.response.send_message(f"❌ Error: {str(e)}", ephemeral=True)
+
+
+@bot.tree.command(name="edit_milestone", description="Admin only – edit an existing milestone.")
+@app_commands.describe(
+    old_amount="The existing milestone amount to edit",
+    new_amount="New wager amount (or leave the same)",
+    new_role="New role to assign (or leave the same)",
+    new_prize="New reward description (or leave the same)"
+)
+@app_commands.checks.has_permissions(administrator=True)
+async def edit_milestone(
+    interaction: discord.Interaction,
+    old_amount: float,
+    new_amount: float,
+    new_role: discord.Role,
+    new_prize: str
+):
+    try:
+        with get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                UPDATE milestones
+                SET milestone_amount = %s,
+                    reward_role_id = %s,
+                    reward_text = %s
+                WHERE guild_id = %s AND milestone_amount = %s;
+            """, (
+                new_amount,
+                str(new_role.id),
+                new_prize,
+                str(interaction.guild.id),
+                old_amount
+            ))
+            if cur.rowcount == 0:
+                await interaction.response.send_message("❌ No milestone found with that amount.", ephemeral=True)
+                return
+            conn.commit()
+        await interaction.response.send_message(
+            f"✅ Milestone `{old_amount}` updated to `{new_amount}`.\n🎖️ Role: `{new_role.name}`\n🎁 Reward: {new_prize}",
+            ephemeral=True
+        )
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Error editing milestone: {str(e)}", ephemeral=True)
+        
+@bot.tree.command(name="list_milestones", description="Admin only – list all current milestones.")
+@app_commands.checks.has_permissions(administrator=True)
+async def list_milestones(interaction: discord.Interaction):
+    try:
+        with get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT milestone_amount, reward_role_id, reward_text
+                FROM milestones
+                WHERE guild_id = %s
+                ORDER BY milestone_amount ASC;
+            """, (str(interaction.guild.id),))
+            rows = cur.fetchall()
+
+        if not rows:
+            await interaction.response.send_message("ℹ️ No milestones set for this server.", ephemeral=True)
+            return
+
+        message = "**🎯 Current Milestones:**\n"
+        for amount, role_id, reward in rows:
+            role = discord.utils.get(interaction.guild.roles, id=int(role_id))
+            role_name = role.name if role else f"(Role ID: {role_id})"
+            message += f"• `{amount}` → 🎖️ `{role_name}` | 🎁 {reward}\n"
+
+        await interaction.response.send_message(message, ephemeral=True)
+
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Error listing milestones: {str(e)}", ephemeral=True)
+
+
+
+@bot.tree.command(name="delete_milestone", description="Admin only – delete a milestone.")
+@app_commands.describe(amount="The milestone amount to delete")
+@app_commands.checks.has_permissions(administrator=True)
+async def delete_milestone(interaction: discord.Interaction, amount: float):
+    try:
+        with get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                DELETE FROM milestones
+                WHERE guild_id = %s AND milestone_amount = %s;
+            """, (str(interaction.guild.id), amount))
+            if cur.rowcount == 0:
+                await interaction.response.send_message("⚠️ No milestone with that amount found.", ephemeral=True)
+            else:
+                conn.commit()
+                await interaction.response.send_message(f"🗑️ Milestone `{amount}` deleted.", ephemeral=True)
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Error deleting milestone: {str(e)}", ephemeral=True)
+
 
 @bot.tree.command(name="progress", description="Check your current wager progress.")
 async def progress(interaction: discord.Interaction):
     try:
         # Channel restriction
-        ALLOWED_CHANNEL_ID = 1368529610072916078  # Replace with your actual channel ID
+        ALLOWED_CHANNEL_ID = 1368529610072916078
         if interaction.channel_id != ALLOWED_CHANNEL_ID:
             channel_mention = f"<#{ALLOWED_CHANNEL_ID}>"
             await interaction.response.send_message(
@@ -104,23 +193,30 @@ async def progress(interaction: discord.Interaction):
             )
             return
 
-
         # Get linked Rainbet username from DB
         with get_connection() as conn:
             cur = conn.cursor()
             cur.execute("SELECT rainbet_username FROM account_links WHERE discord_id = %s", (str(interaction.user.id),))
             result = cur.fetchone()
-            rainbet_username = result[0]
-            # Get milestone data
-            cur.execute("SELECT milestone_amount, reward_role_id, reward_text FROM milestones WHERE guild_id = %s",
-                        (str(interaction.guild.id),))
-            milestone_data = cur.fetchone()
 
-            if not milestone_data:
-                await interaction.response.send_message("❌ No milestone has been set by an admin.", ephemeral=True)
+            if not result:
+                await interaction.response.send_message("❌ You have not linked a Rainbet account.", ephemeral=True)
                 return
 
-            milestone_amount, reward_role_id, reward_text = milestone_data
+            rainbet_username = result[0]
+
+            # Get all milestones for this guild, ordered by amount
+            cur.execute("""
+                SELECT milestone_amount, reward_role_id, reward_text
+                FROM milestones
+                WHERE guild_id = %s
+                ORDER BY milestone_amount ASC;
+            """, (str(interaction.guild.id),))
+            milestones = cur.fetchall()
+
+            if not milestones:
+                await interaction.response.send_message("❌ No milestones have been set by an admin.", ephemeral=True)
+                return
 
         # Call Rainbet API
         url = f"https://services.rainbet.com/v1/external/affiliates?start_at=2025-04-15&end_at={datetime.now().strftime('%Y-%m-%d')}&key={API_KEY}"
@@ -132,32 +228,52 @@ async def progress(interaction: discord.Interaction):
         data = response.json()
         wagered = None
         for affiliate in data.get("affiliates", []):
-            if affiliate["username"] == rainbet_username:
+            if affiliate["username"].lower() == rainbet_username.lower():
                 wagered = float(affiliate["wagered_amount"])
                 break
 
-        # Calculate progress
-        progress_ratio = min(wagered / milestone_amount, 1)
-        filled = int(progress_ratio * 20)
-        empty = 20 - filled
-        progress_bar = f"[{'█' * filled}{'—' * empty}]"
+        if wagered is None:
+            await interaction.response.send_message("❌ No wagering data found for your account.", ephemeral=True)
+            return
 
-        # Compose message
-        message = (
-            f"📊 Casynetic VIP Progress for `{rainbet_username}`:\n"
-            f"💰 Wagered: `{wagered:.2f}` / `{milestone_amount}`\n"
-            f"{progress_bar} {int(progress_ratio * 100)}%\n"
-        )
+        # Find the next milestone
+        next_milestone = None
+        for milestone in milestones:
+            if wagered < milestone[0]:  # milestone_amount
+                next_milestone = milestone
+                break
 
-        # Milestone reached
-        if wagered >= milestone_amount:
-            role = discord.utils.get(interaction.guild.roles, id=int(reward_role_id))
-            await interaction.user.add_roles(role)
-            message += (
-                    f"\n🎉 **Milestone reached!** You’ve been granted the role `{role.name}`.\n"
-                    f"🎁 **Reward:** {reward_text}\n"
-                    f"📩 Please open a ticket to claim your reward!"
-                )
+        if next_milestone:
+            milestone_amount, reward_role_id, reward_text = next_milestone
+            progress_ratio = min(wagered / milestone_amount, 1)
+            filled = int(progress_ratio * 20)
+            empty = 20 - filled
+            progress_bar = f"[{'█' * filled}{'—' * empty}]"
+
+            message = (
+                f"📊 Casynetic VIP Progress for `{rainbet_username}`:\n"
+                f"💰 Wagered: `{wagered:.2f}` / `{milestone_amount}`\n"
+                f"{progress_bar} {int(progress_ratio * 100)}%\n"
+            )
+
+            if wagered >= milestone_amount:
+                role = discord.utils.get(interaction.guild.roles, id=int(reward_role_id))
+                if role:
+                    await interaction.user.add_roles(role)
+                    message += (
+                        f"\n🎉 **Milestone reached!** You’ve been granted the role `{role.name}`.\n"
+                        f"🎁 **Reward:** {reward_text}\n"
+                        f"📩 Please open a ticket to claim your reward!"
+                    )
+
+        else:
+            # All milestones achieved
+            message = (
+                f"🏆 `{rainbet_username}`, you have reached the **maximum VIP status**!\n"
+                f"💰 Total Wagered: `{wagered:.2f}`\n"
+                f"🎉 There are no further milestones to achieve – amazing work!\n"
+                f"📩 If you haven't yet claimed your final reward, please open a ticket."
+            )
 
         await interaction.response.send_message(message, ephemeral=True)
 
