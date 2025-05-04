@@ -111,12 +111,15 @@ async def unlink(interaction: discord.Interaction):
             ephemeral=True
         )
         return
-
-    try:
-        unlink_accounts(str(interaction.user.id))
-        await interaction.response.send_message("✅ Your accounts have been unlinked.", ephemeral=True)
-    except Exception as e:
-        await interaction.response.send_message(f"❌ An error occurred: {str(e)}", ephemeral=True)
+    
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("DELETE FROM account_links WHERE discord_id = %s;", (str(interaction.user.id),))
+            if cursor.rowcount == 0:
+                await interaction.response.send_message("⚠️ No linked account found to unlink.", ephemeral=True)
+            else:
+                conn.commit()
+                await interaction.response.send_message("✅ Your accounts have been unlinked.", ephemeral=True)
 
 @bot.tree.command(name="accinfo", description="Admin only – show linked account info for a user.")
 @app_commands.describe(user="The user you want to query.")
