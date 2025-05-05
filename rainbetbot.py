@@ -187,16 +187,13 @@ async def delete_milestone(interaction: discord.Interaction, amount: float):
 @bot.tree.command(name="progress", description="Check your current wager progress.")
 async def progress(interaction: discord.Interaction):
     try:
-        # Channel restriction
-        ALLOWED_CHANNEL_ID = 1368886522912313467  # Replace with your actual channel ID
+        ALLOWED_CHANNEL_ID = 1368886522912313467
         if interaction.channel_id != ALLOWED_CHANNEL_ID:
-            channel_mention = f"<#{ALLOWED_CHANNEL_ID}>"
             await interaction.response.send_message(
-                f"❌ This command can only be used in {channel_mention}.", ephemeral=True
+                f"❌ This command can only be used in <#{ALLOWED_CHANNEL_ID}>.", ephemeral=True
             )
             return
 
-        # Get linked Rainbet username from DB
         with get_connection() as conn:
             cur = conn.cursor()
             cur.execute("SELECT rainbet_username FROM account_links WHERE discord_id = %s", (str(interaction.user.id),))
@@ -206,7 +203,7 @@ async def progress(interaction: discord.Interaction):
                 return
 
             rainbet_username = result[0]
-            # Get milestone data
+
             cur.execute("SELECT milestone_amount, reward_role_id, reward_text FROM milestones WHERE guild_id = %s",
                         (str(interaction.guild.id),))
             milestones = cur.fetchall()
@@ -215,8 +212,7 @@ async def progress(interaction: discord.Interaction):
                 await interaction.response.send_message("❌ No milestones have been set by an admin.", ephemeral=True)
                 return
 
-        # Call Rainbet API
-        url = f"https://services.rainbet.com/v1/external/affiliates?start_at=2025-04-01&end_at={datetime.now().strftime('%Y-%m-%d')}&key={API_KEY}"
+        url = f"https://services.rainbet.com/v1/external/affiliates?start_at=2025-03-10&end_at={datetime.now().strftime('%Y-%m-%d')}&key={API_KEY}"
         response = requests.get(url)
         if response.status_code != 200:
             await interaction.response.send_message("❌ Failed to fetch data from the Rainbet API.", ephemeral=True)
@@ -225,7 +221,7 @@ async def progress(interaction: discord.Interaction):
         data = response.json()
         wagered = None
         for affiliate in data.get("affiliates", []):
-            if affiliate["username"] == rainbet_username:
+            if affiliate["username"].lower() == rainbet_username.lower():
                 wagered = float(affiliate["wagered_amount"])
                 break
 
@@ -233,30 +229,42 @@ async def progress(interaction: discord.Interaction):
             await interaction.response.send_message("❌ Could not find your wager information.", ephemeral=True)
             return
 
-        # Sort milestones to find the highest milestone the user has achieved
-        milestones.sort(key=lambda x: x[0])  # Sort by milestone_amount (ascending)
+        milestones.sort(key=lambda x: x[0])  # Sort ascending
 
-        # Determine the highest milestone the user has reached
+        # Determine the highest reached and next milestone
         highest_reached = None
+        next_milestone = None
         for milestone in milestones:
             if wagered >= milestone[0]:
                 highest_reached = milestone
-            else:
-                break
+            elif not next_milestone:
+                next_milestone = milestone
 
+        # If nothing reached yet, show progress toward first milestone
         if not highest_reached:
-            await interaction.response.send_message(f"❌ You haven't reached any milestones yet.\nWagered: `{wagered:.2f}`", ephemeral=True)
+            target_amount, target_role_id, reward_text = milestones[0]
+            progress_ratio = min(wagered / target_amount, 1)
+            filled = int(progress_ratio * 20)
+            empty = 20 - filled
+            progress_bar = f"[{'█' * filled}{'—' * empty}]"
+
+            message = (
+                f"📊 Casynetic VIP Progress for `{rainbet_username}`:\n"
+                f"💰 Wagered: `{wagered:.2f}` / `{target_amount}`\n"
+                f"{progress_bar} {int(progress_ratio * 100)}%\n"
+                f"🎁 Upcoming Reward: {reward_text}\n"
+                f"🔓 Unlocks at `{target_amount}` wagered!"
+            )
+            await interaction.response.send_message(message, ephemeral=True)
             return
 
+        # If a milestone was reached
         highest_amount, highest_role_id, reward_text = highest_reached
-
-        # Create progress bar
         progress_ratio = min(wagered / highest_amount, 1)
         filled = int(progress_ratio * 20)
         empty = 20 - filled
         progress_bar = f"[{'█' * filled}{'—' * empty}]"
 
-        # Compose progress message
         message = (
             f"📊 Casynetic VIP Progress for `{rainbet_username}`:\n"
             f"💰 Wagered: `{wagered:.2f}` / `{highest_amount}`\n"
@@ -264,27 +272,21 @@ async def progress(interaction: discord.Interaction):
             f"🎁 Reward: {reward_text}\n"
         )
 
-        # Check if the user has already reached the milestone
-        if wagered >= highest_amount:
-            role = discord.utils.get(interaction.guild.roles, id=int(highest_role_id))
-            if role and role not in interaction.user.roles:
-                # Remove all previous roles with lower milestone_amount
-                roles_to_remove = []
-                for amount, role_id, _ in milestones:
-                    if amount < highest_amount:
-                        role_to_remove = discord.utils.get(interaction.guild.roles, id=int(role_id))
-                        if role_to_remove and role_to_remove in interaction.user.roles:
-                            roles_to_remove.append(role_to_remove)
+        role = discord.utils.get(interaction.guild.roles, id=int(highest_role_id))
+        if role and role not in interaction.user.roles:
+            roles_to_remove = [
+                discord.utils.get(interaction.guild.roles, id=int(rid))
+                for amt, rid, _ in milestones if amt < highest_amount
+            ]
+            roles_to_remove = [r for r in roles_to_remove if r and r in interaction.user.roles]
+            if roles_to_remove:
+                await interaction.user.remove_roles(*roles_to_remove)
 
-                if roles_to_remove:
-                    await interaction.user.remove_roles(*roles_to_remove)
-
-                # Assign the new role
-                await interaction.user.add_roles(role)
-                message += (
-                    f"\n🎉 **Milestone reached!** You’ve been granted the role `{role.name}`.\n"
-                    f"📩 Please open a ticket to claim your reward!"
-                )
+            await interaction.user.add_roles(role)
+            message += (
+                f"\n🎉 **Milestone reached!** You’ve been granted the role `{role.name}`.\n"
+                f"📩 Please open a ticket to claim your reward!"
+            )
 
         await interaction.response.send_message(message, ephemeral=True)
 
