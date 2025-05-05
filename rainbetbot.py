@@ -505,7 +505,6 @@ async def tournament_winner(interaction: discord.Interaction, user: discord.User
             conn.commit()
 
     await update_hall_of_fame()
-    await interaction.channel.send(f"🏆 Congratulations <@{user.id}>! You are the **Tournament Champion**! 🎉")
 
     await interaction.response.send_message("✅ Winner recorded and Hall of Fame updated.", ephemeral=True)
 
