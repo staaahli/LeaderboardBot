@@ -16,8 +16,8 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 DATABASE_URL = os.getenv("DATABASE_URL")  # Railway automatically sets this
 API_KEY = os.getenv("API_KEY")  # Assuming you have an API key as an environment variable
 # Replace with your actual allowed channel ID
-ALLOWED_COMMAND_CHANNEL_ID_FOR_LINK = 1368529085994893372  # <-- deinen Channel ID hier eintragen
-VERIFIED_ROLE_ID = 1368532802555088956
+ALLOWED_COMMAND_CHANNEL_ID_FOR_LINK = 1368886520412377119 # <-- deinen Channel ID hier eintragen
+VERIFIED_ROLE_ID = 1368886448346107914
 def get_connection():
     return psycopg2.connect(DATABASE_URL, sslmode='require')
 
@@ -188,7 +188,7 @@ async def delete_milestone(interaction: discord.Interaction, amount: float):
 async def progress(interaction: discord.Interaction):
     try:
         # Channel restriction
-        ALLOWED_CHANNEL_ID = 1368529610072916078  # Replace with your actual channel ID
+        ALLOWED_CHANNEL_ID = 1368886522912313467  # Replace with your actual channel ID
         if interaction.channel_id != ALLOWED_CHANNEL_ID:
             channel_mention = f"<#{ALLOWED_CHANNEL_ID}>"
             await interaction.response.send_message(
@@ -332,7 +332,7 @@ async def link(interaction: discord.Interaction, rainbet: str, kick: str):
             )
             return
 
-        role_id = 1368532715246452806  # Replace with the real role ID
+        role_id = 1368886447209185351  # Replace with the real role ID
         role = discord.utils.get(interaction.guild.roles, id=role_id)
         if role:
             await interaction.user.add_roles(role)
@@ -372,8 +372,10 @@ async def unlink(interaction: discord.Interaction):
                 await interaction.response.send_message("⚠️ No linked account found to unlink.", ephemeral=True)
             else:
                 conn.commit()
-                await interaction.response.send_message("✅ Your accounts have been unlinked.", ephemeral=True)
-
+                affiliate_role = discord.utils.get(interaction.user.roles, id=1368886447209185351)
+                await interaction.user.remove_roles(affiliate_role)
+                await interaction.response.send_message("✅ Your accounts have been unlinked and the **Verified** role has been removed.", ephemeral=True)
+                
 @bot.tree.command(name="accinfo", description="Admin only – show linked account info for a user.")
 @app_commands.describe(user="The user you want to query.")
 @app_commands.checks.has_permissions(administrator=True)
