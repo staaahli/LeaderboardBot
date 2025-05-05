@@ -455,11 +455,11 @@ async def tournament_start(interaction: discord.Interaction):
 @app_commands.checks.has_permissions(administrator=True)
 async def tournament_close(interaction: discord.Interaction):
     participants = list(bot.tournament_state["participants"])
-    if len(participants) < 1:
+    if len(participants) < 4:
         await interaction.response.send_message("⚠️ Not enough participants (need at least 4).", ephemeral=True)
         return
 
-    selected = random.sample(participants, 1)
+    selected = random.sample(participants, 4)
     bot.tournament_state["final_four"] = selected
 
     mentions = " ".join(f"<@{uid}>" for uid in selected)
