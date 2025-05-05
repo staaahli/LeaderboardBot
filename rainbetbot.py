@@ -216,7 +216,7 @@ async def progress(interaction: discord.Interaction):
                 return
 
         # Call Rainbet API
-        url = f"https://services.rainbet.com/v1/external/affiliates?start_at=2025-04-15&end_at={datetime.now().strftime('%Y-%m-%d')}&key={API_KEY}"
+        url = f"https://services.rainbet.com/v1/external/affiliates?start_at=2025-04-01&end_at={datetime.now().strftime('%Y-%m-%d')}&key={API_KEY}"
         response = requests.get(url)
         if response.status_code != 200:
             await interaction.response.send_message("❌ Failed to fetch data from the Rainbet API.", ephemeral=True)
@@ -322,7 +322,7 @@ async def link(interaction: discord.Interaction, rainbet: str, kick: str):
         data = response.json()
         found = False
         for affiliate in data.get("affiliates", []):
-            if affiliate["username"].lower() == rainbet.lower():
+            if affiliate["username"] == rainbet:
                 found = True
                 break
 
