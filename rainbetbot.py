@@ -374,7 +374,7 @@ async def unlink(interaction: discord.Interaction):
                 conn.commit()
                 affiliate_role = discord.utils.get(interaction.user.roles, id=1368886447209185351)
                 await interaction.user.remove_roles(affiliate_role)
-                await interaction.response.send_message("✅ Your accounts have been unlinked and the **Verified** role has been removed.", ephemeral=True)
+                await interaction.response.send_message("✅ Your accounts have been unlinked and the **Degen Syndicate** role has been removed.", ephemeral=True)
                 
 @bot.tree.command(name="accinfo", description="Admin only – show linked account info for a user.")
 @app_commands.describe(user="The user you want to query.")
@@ -413,7 +413,7 @@ async def update_hall_of_fame():
         with conn.cursor() as cursor:
             cursor.execute("SELECT user_id, wins FROM tournament_winners ORDER BY wins DESC LIMIT 10;")
             rows = cursor.fetchall()
-    HALL_OF_FAME_CHANNEL_ID= 1368860827695972372 
+    HALL_OF_FAME_CHANNEL_ID= 1368886530969702463
     channel = bot.get_channel(HALL_OF_FAME_CHANNEL_ID)
     if not channel:
         return
