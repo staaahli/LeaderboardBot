@@ -212,7 +212,7 @@ async def progress(interaction: discord.Interaction):
                 await interaction.response.send_message("❌ No milestones have been set by an admin.", ephemeral=True)
                 return
 
-        url = f"https://services.rainbet.com/v1/external/affiliates?start_at=2025-04-10&end_at={datetime.now().strftime('%Y-%m-%d')}&key={API_KEY}"
+        url = f"https://services.rainbet.com/v1/external/affiliates?start_at=2025-05-01&end_at={datetime.now().strftime('%Y-%m-%d')}&key={API_KEY}"
         response = requests.get(url)
         if response.status_code != 200:
             await interaction.response.send_message("❌ Failed to fetch data from the Rainbet API.", ephemeral=True)
@@ -315,25 +315,6 @@ async def link(interaction: discord.Interaction, rainbet: str, kick: str):
         return
 
     try:
-        url = f"https://services.rainbet.com/v1/external/affiliates?start_at=2025-04-10&end_at={datetime.now().strftime('%Y-%m-%d')}&key={API_KEY}"
-        response = requests.get(url)
-        if response.status_code != 200:
-            await interaction.response.send_message("❌ Failed to fetch data from the Rainbet API.", ephemeral=True)
-            return
-
-        data = response.json()
-        found = False
-        for affiliate in data.get("affiliates", []):
-            if affiliate["username"] == rainbet:
-                found = True
-                break
-
-        if not found:
-            await interaction.response.send_message(
-                "❌ The provided Rainbet account is not under our affiliate code.", ephemeral=True
-            )
-            return
-
         role_id = 1368886447209185351  # Replace with the real role ID
         role = discord.utils.get(interaction.guild.roles, id=role_id)
         if role:
