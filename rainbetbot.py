@@ -344,7 +344,6 @@ async def unlink(interaction: discord.Interaction, user: discord.Member):
     with get_connection() as conn:
         with conn.cursor() as cursor:
             cursor.execute("DELETE FROM account_links WHERE discord_id = %s;", (str(user.id),))
-            cursor.execute("DELETE FROM account_links WHERE discord_id = %s;", (str(user.id),))
             if cursor.rowcount == 0:
                 await interaction.response.send_message(f"⚠️ No linked account found for {user.mention}.", ephemeral=True)
             else:
