@@ -35,7 +35,9 @@ def init_db():
             conn.commit()
 
 def link_accounts(discord_id: str, rainbet_username: str, kick_username: str):
+
     with get_connection() as conn:
+        print("Connected to DB, about to execute INSERT.")
         with conn.cursor() as cursor:
             cursor.execute("""
                 INSERT INTO account_links (discord_id, rainbet_username, kick_username)
@@ -323,6 +325,8 @@ async def link(interaction: discord.Interaction, user: discord.Member, rainbet: 
             await user.add_roles(role)
 
         link_accounts(str(user.id), rainbet, kick)
+        print(f"Linking user ID {user.id} with Rainbet: {rainbet}, Kick: {kick}")
+
 
         await interaction.response.send_message(
             f"✅ Successfully linked accounts for {user.mention}!\nRainbet: `{rainbet}`\nKick: `{kick}`\nRole `{role.name}` assigned.",
