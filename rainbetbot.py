@@ -6,6 +6,7 @@ import psycopg2
 from datetime import datetime
 import requests
 import random
+from calendar import monthrange
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -15,8 +16,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 # ===== Database Setup =====
 DATABASE_URL = os.getenv("DATABASE_URL")  # Railway automatically sets this
 API_KEY = os.getenv("API_KEY")  # Assuming you have an API key as an environment variable
-# Replace with your actual allowed channel ID
-ALLOWED_COMMAND_CHANNEL_ID_FOR_LINK = 1368886520412377119 # <-- deinen Channel ID hier eintragen
+
 VERIFIED_ROLE_ID = 1368886448346107914
 def get_connection():
     return psycopg2.connect(DATABASE_URL, sslmode='require')
@@ -212,24 +212,35 @@ async def progress(interaction: discord.Interaction):
                 await interaction.response.send_message("❌ No milestones have been set by an admin.", ephemeral=True)
                 return
 
-        url = f"https://services.rainbet.com/v1/external/affiliates?start_at=2025-05-01&end_at={datetime.now().strftime('%Y-%m-%d')}&key={API_KEY}"
-        response = requests.get(url)
-        if response.status_code != 200:
-            await interaction.response.send_message("❌ Failed to fetch data from the Rainbet API.", ephemeral=True)
-            return
+       
+            now = datetime.now()
+            year = now.year
+            month = now.month
+            _, last_day = monthrange(year, month)
 
-        data = response.json()
-        wagered = None
-        for affiliate in data.get("affiliates", []):
-            if affiliate["username"].lower() == rainbet_username.lower():
+            # Set start date: 2nd if month has 31 days, otherwise 1st
+            start_day = 2 if last_day == 31 else 1
+            start_date = f"{year}-{month:02d}-{start_day:02d}"
+            end_date = f"{year}-{month:02d}-{last_day:02d}"
+
+            url = f"https://services.rainbet.com/v1/external/affiliates?start_at={start_date}&end_at={end_date}&key={API_KEY}"
+            response = requests.get(url)
+            if response.status_code != 200:
+                await interaction.response.send_message("❌ Failed to fetch data from the Rainbet API.", ephemeral=True)
+                return
+
+            data = response.json()
+            wagered = None
+            for affiliate in data.get("affiliates", []):
+             if affiliate["username"].lower() == rainbet_username.lower():
                 wagered = float(affiliate["wagered_amount"])
                 break
 
-        if wagered is None:
-            await interaction.response.send_message("❌ Could not find your wager information.", ephemeral=True)
-            return
+            if wagered is None:
+             await interaction.response.send_message("❌ Could not find your wager information.", ephemeral=True)
+             return
 
-        milestones.sort(key=lambda x: x[0])  # Sort ascending
+            milestones.sort(key=lambda x: x[0])  # Sort ascending
 
         # Determine the highest reached and next milestone
         highest_reached = None
@@ -296,34 +307,24 @@ async def progress(interaction: discord.Interaction):
 
 
 
-@bot.tree.command(name="link", description="Link your Rainbet and Kick accounts.")
-@app_commands.describe(rainbet="Your Rainbet username", kick="Your Kick username")
-async def link(interaction: discord.Interaction, rainbet: str, kick: str):
-    if interaction.channel.id != ALLOWED_COMMAND_CHANNEL_ID_FOR_LINK:
-        await interaction.response.send_message(
-            f"❌ This command can only be used in <#{ALLOWED_COMMAND_CHANNEL_ID_FOR_LINK}>.",
-            ephemeral=True
-        )
-        return
-    
-    verified_role = discord.utils.get(interaction.user.roles, id=VERIFIED_ROLE_ID)
-    if not verified_role:
-        await interaction.response.send_message(
-            "❌ You must have the **Verified** role to use this command.",
-            ephemeral=True
-        )
-        return
-
+@bot.tree.command(name="link", description="Link a user's Rainbet and Kick accounts.")
+@app_commands.describe(
+    user="The Discord user to link",
+    rainbet="Their Rainbet username",
+    kick="Their Kick username"
+)
+@app_commands.checks.has_permissions(administrator=True)
+async def link(interaction: discord.Interaction, user: discord.Member, rainbet: str, kick: str):
     try:
-        role_id = 1368886447209185351  # Replace with the real role ID
+        role_id = 1368886447209185351  # Your actual role ID
         role = discord.utils.get(interaction.guild.roles, id=role_id)
         if role:
-            await interaction.user.add_roles(role)
+            await user.add_roles(role)
 
-        link_accounts(str(interaction.user.id), rainbet, kick)
+        link_accounts(str(user.id), rainbet, kick)
 
         await interaction.response.send_message(
-            f"✅ Successfully linked your accounts!\nRainbet: `{rainbet}`\nKick: `{kick}`\nRole `{role.name}` assigned.",
+            f"✅ Successfully linked accounts for {user.mention}!\nRainbet: `{rainbet}`\nKick: `{kick}`\nRole `{role.name}` assigned.",
             ephemeral=True
         )
     except Exception as e:
@@ -331,33 +332,26 @@ async def link(interaction: discord.Interaction, rainbet: str, kick: str):
 
 
 
-@bot.tree.command(name="unlink", description="Unlink your Rainbet and Kick accounts.")
-async def unlink(interaction: discord.Interaction):
-    if interaction.channel.id != ALLOWED_COMMAND_CHANNEL_ID_FOR_LINK:
-        await interaction.response.send_message(
-            f"❌ This command can only be used in <#{ALLOWED_COMMAND_CHANNEL_ID_FOR_LINK}>.",
-            ephemeral=True
-        )
-        return
-    
-    verified_role = discord.utils.get(interaction.user.roles, id=VERIFIED_ROLE_ID)
-    if not verified_role:
-        await interaction.response.send_message(
-            "❌ You must have the **Verified** role to use this command.",
-            ephemeral=True
-        )
-        return
-    
+@bot.tree.command(name="unlink", description="Unlink a user's Rainbet and Kick accounts.")
+@app_commands.describe(user="The Discord user to unlink")
+@app_commands.checks.has_permissions(administrator=True)
+async def unlink(interaction: discord.Interaction, user: discord.Member):
     with get_connection() as conn:
         with conn.cursor() as cursor:
-            cursor.execute("DELETE FROM account_links WHERE discord_id = %s;", (str(interaction.user.id),))
+            cursor.execute("DELETE FROM account_links WHERE discord_id = %s;", (str(user.id),))
             if cursor.rowcount == 0:
-                await interaction.response.send_message("⚠️ No linked account found to unlink.", ephemeral=True)
+                await interaction.response.send_message(f"⚠️ No linked account found for {user.mention}.", ephemeral=True)
             else:
                 conn.commit()
-                affiliate_role = discord.utils.get(interaction.user.roles, id=1368886447209185351)
-                await interaction.user.remove_roles(affiliate_role)
-                await interaction.response.send_message("✅ Your accounts have been unlinked and the **Degen Syndicate** role has been removed.", ephemeral=True)
+                affiliate_role = discord.utils.get(interaction.guild.roles, id=1368886447209185351)
+                if affiliate_role and affiliate_role in user.roles:
+                    await user.remove_roles(affiliate_role)
+                await interaction.response.send_message(
+                    f"✅ Accounts for {user.mention} have been unlinked and the **Degen Syndicate** role removed.",
+                    ephemeral=True
+                )
+
+
                 
 @bot.tree.command(name="accinfo", description="Admin only – show linked account info for a user.")
 @app_commands.describe(user="The user you want to query.")
