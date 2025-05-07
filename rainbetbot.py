@@ -16,7 +16,8 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 # ===== Database Setup =====
 DATABASE_URL = os.getenv("DATABASE_URL")  # Railway automatically sets this
 API_KEY = os.getenv("API_KEY")  # Assuming you have an API key as an environment variable
-
+# Replace with your actual allowed channel ID
+ALLOWED_COMMAND_CHANNEL_ID_FOR_LINK = 1368886520412377119 # <-- deinen Channel ID hier eintragen
 VERIFIED_ROLE_ID = 1368886448346107914
 def get_connection():
     return psycopg2.connect(DATABASE_URL, sslmode='require')
@@ -316,7 +317,7 @@ async def progress(interaction: discord.Interaction):
 @app_commands.checks.has_permissions(administrator=True)
 async def link(interaction: discord.Interaction, user: discord.Member, rainbet: str, kick: str):
     try:
-        role_id = 1368886447209185351  # Your actual role ID
+        role_id = 1368886447209185351  # Replace with your actual role ID
         role = discord.utils.get(interaction.guild.roles, id=role_id)
         if role:
             await user.add_roles(role)
@@ -338,6 +339,7 @@ async def link(interaction: discord.Interaction, user: discord.Member, rainbet: 
 async def unlink(interaction: discord.Interaction, user: discord.Member):
     with get_connection() as conn:
         with conn.cursor() as cursor:
+            cursor.execute("DELETE FROM account_links WHERE discord_id = %s;", (str(user.id),))
             cursor.execute("DELETE FROM account_links WHERE discord_id = %s;", (str(user.id),))
             if cursor.rowcount == 0:
                 await interaction.response.send_message(f"⚠️ No linked account found for {user.mention}.", ephemeral=True)
